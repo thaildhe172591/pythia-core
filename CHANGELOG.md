@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.7.0.dev0 — unreleased
+
+Phase 3d of the plan in DESIGN.md: autopilot leases.
+
+- **`autopilot request`** writes a card — connection, groups, hours, writes,
+  destructive or not, the task — with an 8-digit token. Nothing is
+  delegated until the developer approves it through any door, or runs
+  **`autopilot on`** at a console.
+- **While active, `apply` and `deploy` land what the lease covers** in one
+  run, still snapshotted, rehearsed, verified and journaled. Never another
+  or a protected connection (read fresh each write), a group or a
+  destructive statement the card did not name, or more than 1000 rows. A
+  preview says why a write was not covered.
+- **A lease ends** when it expires, is spent, is revoked (`autopilot off`,
+  anyone's) or pauses itself — on a write that breaks something, or five
+  failures in a row. A missing, corrupt or unapproved lease file is no lease.
+- **A lease naming a denied group lifts the deny while it lasts**, as its
+  card says.
+- **`autopilot report`** lists every write under a lease, with restores.
+- The guard denies writing the lease file by hand; the session brief shows
+  the lease.
+- **`tests/test_lease.py`**, adversarial and mutation-checked.
+
 ## 0.6.0.dev0 — unreleased
 
 Phase 3c of the plan in DESIGN.md: the release.

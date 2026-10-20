@@ -27,6 +27,7 @@ jobs:
       - run: python tests/test_harness.py
       - run: python tests/test_doors.py
       - run: python tests/test_release.py
+      - run: python tests/test_lease.py
 
   package:
     runs-on: ubuntu-latest

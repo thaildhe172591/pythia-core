@@ -25,7 +25,7 @@ import pathlib
 import re
 import sys
 
-from . import gate, grants, journal, policy
+from . import gate, grants, journal, lease, policy
 from .human import human_at_the_keyboard
 from .output import impact_summary, summary_lines
 
@@ -91,8 +91,9 @@ def _first_line(text):
     return str(text).strip().splitlines()[0][:80] if str(text).strip() else ""
 
 
-def preflight(engine, state, statements):
-    """Refuse, before anything connects or runs, what the gate cannot place."""
+def preflight(engine, state, statements, lifted=lambda group: False):
+    """Refuse, before anything connects or runs, what the gate cannot place.
+    `lifted(group)` is true for a group an active lease names."""
     bad = [s for s in statements if s["group"] is None]
     if bad:
         sys.exit("Refused before anything ran — these statements cannot go "
@@ -108,7 +109,8 @@ def preflight(engine, state, statements):
                      for s in sets[:10]) + "\nSet it for the connection instead "
                  "(the role's defaults), or apply it alone.")
     eff = policy.load(state)
-    denied = [s for s in statements if eff[s["group"]][0] == "deny"]
+    denied = [s for s in statements if eff[s["group"]][0] == "deny"
+              and not lifted(s["group"])]
     if denied:
         groups = sorted({s["group"] for s in denied})
         sys.exit(f"Refused before anything ran: {', '.join(groups)} "
@@ -252,7 +254,9 @@ def run_deploy(engine, conn, ns):
     state, cmd = ns.state, engine.command
     then = f"{cmd} deploy {' '.join(ns.paths)}"
     statements = collect(engine, ns.paths)
-    preflight(engine, state, statements)
+    entry = getattr(ns, "conn_entry", None)
+    preflight(engine, state, statements, lambda g: lease.names_group(
+        state, ns.conn_name, entry, g))
     if ns.yes and not human_at_the_keyboard(engine):
         sys.exit(gate.headless_yes(engine))
     confirm = str(ns.confirm or "").strip().lower() or None
@@ -274,6 +278,17 @@ def run_deploy(engine, conn, ns):
                  "is rehearsed as one, so there is nothing to approve.")
     token = batch_token(ns.conn_name, ns.schema, list(ns.paths),
                         [m["token"] for m in members])
+    auto_why = None
+    if not writing:
+        for m in members:
+            covered, why = lease.covers(state, ns.conn_name, entry, m["group"],
+                                        m["destructive"],
+                                        m["row_set"]["count"] if m["row_set"] else None)
+            if not covered:
+                auto_why = why and f"statement {m['n']}: {why}"
+                break
+        else:
+            writing = "autopilot"
 
     if approved is not None:
         moved = _moved(approved, members)
@@ -292,7 +307,7 @@ def run_deploy(engine, conn, ns):
         write_batch(state, rec)
         for m in members:
             journal.update_entry(state, m["entry"], batch=token)
-        _print_preview(engine, ns, rec)
+        _print_preview(engine, ns, rec, auto_why)
         return 0
 
     conn.commit()
@@ -300,11 +315,20 @@ def run_deploy(engine, conn, ns):
         grants.spend(state, confirm)
         approved["applied"] = True
         write_batch(state, approved)
+    via = "grant" if confirm else "autopilot" if writing == "autopilot" else "yes"
+    tag = lease.read(state).get("token") if via == "autopilot" else None
     for m in members:
-        journal.update_entry(state, m["entry"], applied=True,
-                             confirmed_via="grant" if confirm else "yes",
-                             batch=confirm or token)
-    return _report(engine, ns, members)
+        journal.update_entry(state, m["entry"], applied=True, confirmed_via=via,
+                             batch=confirm or token, autopilot=tag)
+    code = _report(engine, ns, members)
+    if via == "autopilot":
+        broken = sum(len(m["rehearsal"]["broken"]) + len(m["rehearsal"]["own_errors"])
+                     for m in members)
+        after = lease.note_write(state, not broken, broken, members[-1]["entry"],
+                                 count=len(members))
+        if not ns.json:
+            print(f"\n  Landed under the developer's autopilot lease — {lease.line(after)}")
+    return code
 
 
 def _check_approval(engine, state, ns, confirm, statements, then):
@@ -361,7 +385,7 @@ def _moved(rec, members):
     return None
 
 
-def _print_preview(engine, ns, rec):
+def _print_preview(engine, ns, rec, auto_why=None):
     if ns.json:
         print(json.dumps({"ok": True, "batch": rec["token"], "members": rec["members"],
                           "will_apply": False}, default=str))
@@ -382,6 +406,9 @@ def _print_preview(engine, ns, rec):
             print(f"    -- truncated: {len(diff) - 40} more lines in "
                   f"{journal.root(ns.state) / m['entry']}")
     print()
+    if auto_why:
+        print(f"  ! not landed under autopilot — {auto_why}; the release needs "
+              "its own approval.")
     for ln in gate.door_lines(engine, rec["token"], rec["then"]):
         print(f"  {ln}")
 

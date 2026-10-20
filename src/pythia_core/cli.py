@@ -16,12 +16,12 @@ import os
 import pathlib
 import sys
 
-from . import (__version__, doors, gate, harness, install, journal, policy,
-               release, skills)
+from . import (__version__, doors, gate, harness, install, journal, lease,
+               policy, release, skills)
 from .config import (config_rel, connection_summary, find_config,
                      resolve_connection, state_dir)
 from .engine import refuse_unless
-from .human import human_at_the_keyboard
+from .human import console_session, human_at_the_keyboard
 from .output import (ERROR_COLS, TREE_COLS, clip, emit_source, emit_table,
                      emit_text, fetch_n, format_errors, impact_summary,
                      json_envelope, render_tree, summary_lines)
@@ -36,7 +36,7 @@ COMMAND_TIERS = {"check": ("connect",), "ls": READ_TIERS, "src": READ_TIERS,
                  "apply": WRITE_TIERS, "restore": WRITE_TIERS,
                  "deploy": WRITE_TIERS + ("release",)}
 OFFLINE = ("version", "connections", "approve", "policy", "history", "journal",
-           "hook", "install", "doctor", "skill", "mcp")
+           "hook", "install", "doctor", "skill", "mcp", "autopilot")
 
 
 def build_parser(engine):
@@ -138,6 +138,22 @@ def build_parser(engine):
     s.add_argument("action", choices=("list", "show", "restore"))
     s.add_argument("id", nargs="?")
     write_flags(s)
+    s = sub.add_parser("autopilot", parents=[common()],
+                       help="a lease: the developer delegates a session once "
+                            "instead of approving every write")
+    s.add_argument("action", nargs="?", default="status",
+                   choices=("status", "request", "on", "off", "report"))
+    s.add_argument("token", nargs="?", help="report: an earlier lease's token")
+    s.add_argument("--groups", help=f"comma list of {', '.join(lease.GROUPS_ALL)} "
+                                    f"or all (default {','.join(lease.GROUPS_DEFAULT)})")
+    s.add_argument("--hours", type=float,
+                   help=f"how long (default {lease.HOURS_DEFAULT}, at most "
+                        f"{lease.HOURS_MAX})")
+    s.add_argument("--max-writes", type=int, dest="max_writes",
+                   help=f"how many writes (default {lease.WRITES_DEFAULT})")
+    s.add_argument("--destructive", action="store_true",
+                   help="cover destructive statements too (DROP, TRUNCATE...)")
+    s.add_argument("--note", nargs="*", help="the task, in the agent's words")
     s = sub.add_parser("history", parents=[common()],
                        help="every version of one object the journal holds")
     s.add_argument("name")
@@ -525,10 +541,107 @@ def cmd_skill(engine, ns):
     return 1 if bad else 0
 
 
+def cmd_autopilot(engine, ns):
+    """Requesting and revoking are anyone's; activating is the developer's —
+    approving the request's card through a door, or `autopilot on` at a
+    console."""
+    state, run = ns.state, engine.command
+    if ns.action in ("request", "on"):
+        name, entry = resolve_connection(ns.cfg, ns.conn, os.environ, ns.cwd,
+                                         ns.root_found, engine)
+        old = lease.read(state) or {}
+        groups = (lease.parse_groups(ns.groups) if ns.groups
+                  else list(old.get("groups") or lease.GROUPS_DEFAULT))
+        req = lease.new_request(state, name, entry, groups=groups, hours=ns.hours,
+                                max_writes=ns.max_writes,
+                                destructive=ns.destructive,
+                                note=" ".join(ns.note or []))
+        card = lease.card(engine, state, req)
+        if ns.action == "on":
+            if not console_session():
+                lease.request_path(state, req["token"]).unlink()
+                sys.exit(f"autopilot on is the developer's command, at a real "
+                         f"console. Agents: run `{run} autopilot request` and "
+                         "ask with its card, through the approval doors.")
+            msg = lease.activate(engine, state, req, "console")
+            print("\n".join(f"  {ln}" for ln in card) + f"\n\n  {msg}")
+            return 0
+        text = f"{run} approve {req['token']}\n" + "\n".join(card)
+        if ns.json:
+            print(json.dumps({"ok": True, "token": req["token"], "card": text,
+                              "request": req}))
+            return 0
+        print(f"\n  Autopilot request {req['token']}:")
+        for ln in card:
+            print(f"  {ln}")
+        print()
+        for ln in gate.door_lines(engine, req["token"],
+                                  f"{run} apply <file> (no --confirm while the "
+                                  "lease lasts)", confirm=False):
+            print(f"  {ln}")
+        return 0
+    if ns.action == "off":
+        rec = lease.revoke(state)
+        print(json.dumps({"ok": True, "revoked": bool(rec)}) if ns.json else
+              "Autopilot revoked — every write needs its own approval again."
+              if rec else "No autopilot lease is active.")
+        return 0
+    rec = lease.read(state)
+    if ns.action == "report":
+        if ns.token:
+            rec = lease._read(lease.root(state) / "history" / f"{ns.token}.json") \
+                if lease.TOKEN_RE.fullmatch(ns.token) else None
+            rec = rec or (lease.read(state) if (lease.read(state) or {}).get(
+                "token") == ns.token else None)
+        if not rec:
+            sys.exit("No autopilot lease on record.")
+        rows = []
+        for eid in reversed(journal.list_entries(state)):
+            m = journal.read_entry(state, eid)["meta"]
+            if m.get("autopilot") != rec.get("token"):
+                continue
+            reh = m.get("rehearsal") or {}
+            bad = reh.get("broken") or reh.get("own_errors")
+            rows.append({"entry": eid, "object": m.get("object"),
+                         "group": m.get("group"),
+                         "verdict": ("not written" if not m.get("applied") else
+                                     "BROKEN (exit 3)" if bad else "ok"),
+                         "restore": (f"{run} journal restore {eid}"
+                                     if m.get("applied") and m.get("group")
+                                     in policy.UNDOABLE else None)})
+        if ns.json:
+            print(json.dumps({"lease": rec, "writes": rows}, default=str))
+            return 0
+        print(lease.line(rec))
+        if not rows:
+            print("-- no writes under this lease yet")
+            return 0
+        for r in rows:
+            print(f"  {r['entry']:<48} {r['verdict']:<16} [{r['group']}] {r['object']}")
+        undo = [r["restore"] for r in rows if r["restore"]]
+        if undo:
+            print("\n-- to undo, newest first (each restore is itself a write and "
+                  "goes through the gate):")
+            for u in reversed(undo):
+                print(f"     {u}")
+        if any(r["verdict"].startswith("BROKEN") for r in rows):
+            print("\n-- a write ended BROKEN: report it as broken, never as done.")
+        return 0
+    waiting = lease.pending(state)
+    if ns.json:
+        print(json.dumps({"lease": rec, "status": lease.status(rec),
+                          "pending_requests": waiting}, default=str))
+        return 0
+    print(lease.line(rec))
+    if waiting:
+        print(f"-- request(s) waiting for the developer's approval: {', '.join(waiting)}")
+    return 0
+
+
 OFFLINE_COMMANDS = {"approve": cmd_approve, "policy": cmd_policy,
                     "journal": cmd_journal, "history": cmd_history,
                     "install": cmd_install, "doctor": cmd_doctor,
-                    "skill": cmd_skill}
+                    "skill": cmd_skill, "autopilot": cmd_autopilot}
 
 
 def main(engine, argv=None):
@@ -553,6 +666,7 @@ def main(engine, argv=None):
     cfg, root = find_config(cwd, os.environ, engine)
     ns.root = pathlib.Path(root) if root is not None else cwd
     ns.state = state_dir(ns.root, engine)
+    ns.cfg, ns.cwd, ns.root_found = cfg, cwd, root
     if ns.command == "connections":
         return cmd_connections(engine, ns, cfg)
     key = ns.command
@@ -572,7 +686,7 @@ def main(engine, argv=None):
     if getattr(ns, "yes", False) and not human_at_the_keyboard(engine):
         sys.exit(gate.headless_yes(engine))
     name, entry = resolve_connection(cfg, ns.conn, os.environ, cwd, root, engine)
-    ns.conn_name, ns.schema = name, engine.schema_of(entry)
+    ns.conn_name, ns.schema, ns.conn_entry = name, engine.schema_of(entry), entry
     print(f"-- connection={name} schema={ns.schema}", file=sys.stderr)
     errors = engine.driver_errors()
     try:

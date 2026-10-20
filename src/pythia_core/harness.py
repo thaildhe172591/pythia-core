@@ -31,7 +31,7 @@ import shlex
 import shutil
 import sys
 
-from . import grants, policy
+from . import grants, lease, policy
 from .config import (CONFIG_NAME, STATE_DIR, config_rel, connection_summary,
                      find_config, resolve_connection, state_dir)
 
@@ -152,6 +152,10 @@ def classify_argv(engine, argv):
         return ("read" if ns.action == "show" else "other"), ns
     if sub == "skill":
         return ("read" if ns.action == "lint" else "other"), ns
+    if sub == "autopilot":
+        # a request delegates nothing and off only tightens; on is the
+        # developer's, at a console
+        return ("other" if ns.action == "on" else "read"), ns
     if sub == "journal":
         if ns.action in ("list", "show"):
             return "read", ns
@@ -212,6 +216,10 @@ def _reasons(engine):
         "hook": (f"`{run} approve --hook` is the client's door: it reads the "
                  "AskUserQuestion answer Claude Code hands it. Piping a "
                  "payload in by hand would forge the developer's approval."),
+        "lease": ("An autopilot lease is the developer's delegation: it is "
+                  f"requested with `{run} autopilot request` and approved on its "
+                  f"card. Writing the file by hand would forge it; "
+                  f"`{run} autopilot status` reads it."),
         "ci": (f"{engine.env_prefix}_CI is the pipeline's escape (a CI job "
                "with no console). An agent setting it would be approving its "
                "own write; the developer approves at their console."),
@@ -245,6 +253,8 @@ def _bash_protected(engine, command):
         return "grant"
     if re.search(near + r"policy\.json", command, re.I):
         return "policy"
+    if re.search(near + r"autopilot", command, re.I):
+        return "lease"
     return None
 
 
@@ -371,18 +381,27 @@ def _decide(engine, payload, now):
         return _allow(f"{engine.command} read-only command — it cannot write")
     if payload.get("permission_mode") == "plan" or kind not in ("preview", "write"):
         return None
-    if kind == "preview":
-        return _allow(f"{engine.command} preview — rehearsed and rolled back; "
-                      "it writes nothing")
-    token = str(ns.confirm or "").strip().lower()
-    grant = grants.read(state_dir(root, engine), token)
     conn_name = ns.conn
     if not conn_name:
         try:
             conn_name = resolve_connection(cfg, None, os.environ, cwd, root,
                                            engine)[0]
         except SystemExit:
-            return None
+            conn_name = None
+    state = state_dir(root, engine)
+    if kind == "preview":
+        rec = lease.read(state)
+        if lease.status(rec) == "active" and conn_name and \
+                str(rec.get("connection", "")).upper() == conn_name.upper():
+            return _allow(f"{engine.command} under the developer's autopilot "
+                          "lease: it lands only what the lease covers, and "
+                          "re-checks the scope itself")
+        return _allow(f"{engine.command} preview — rehearsed and rolled back; "
+                      "it writes nothing")
+    if not conn_name:
+        return None
+    token = str(ns.confirm or "").strip().lower()
+    grant = grants.read(state, token)
     if grant and grants.status(grant, conn_name, now) == "ok":
         return _allow(f"the developer approved {token} ({grant.get('approver')}); "
                       f"{engine.command} re-verifies it before writing")
@@ -413,7 +432,10 @@ DO     writes only via `{run} apply <file>` (one statement) or `{run}
        Code); the `{tool}` tool (MCP; Codex starts here);
        `{run} approve <token>` in the developer's terminal. Never mint it.
        Then `{run} apply <file> --confirm <token>`. Evidence before done:
-       `{run} errors`; NOT VERIFIED is said plainly. Skills: `using-{run}`."""
+       `{run} errors`; NOT VERIFIED is said plainly. A lease the developer
+       approved (`{run} autopilot request`) lands covered writes unasked:
+       report each (`{run} autopilot report`); paused means stop and show
+       the developer. Skills: `using-{run}`."""
 
 
 def state_lines(engine, root):
@@ -436,6 +458,7 @@ def state_lines(engine, root):
         names = ", ".join(r["name"] + ("*" if r["default"] else "") for r in rows)
         lines.append(f"connections: {names or 'none filled in'} (* = default; "
                      f"`{run} connections` for details)")
+    lines.append(lease.line(lease.read(state_dir(root, engine))))
     try:
         eff = policy.load(state_dir(root, engine))
         lines.append("policy: " + ", ".join(f"{g} {v}" for g, (v, _) in eff.items()))

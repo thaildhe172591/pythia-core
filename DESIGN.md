@@ -1,7 +1,7 @@
 # The pythia family — design
 
-Status: **Phase 3c** (October 2026). This document is the plan; the code in
-this repository is its first six steps. Where the two disagree, the code is what
+Status: **Phase 3d** (October 2026). This document is the plan; the code in
+this repository is its first seven steps. Where the two disagree, the code is what
 runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
@@ -88,9 +88,9 @@ engine.** Everything else is core.
 Phases 0–2 brought connections, the output contract, the query lint, the
 policy, tokens and grants (with the console door only), the journal and the
 six steps. Phase 3a brought the harness: the guard, the session brief,
-install, doctor and the skill lint. Phase 3b brought the chat doors, and
-Phase 3c the release: `deploy`. Leases and the lint framework (3d) follow
-(§7).
+install, doctor and the skill lint. Phase 3b brought the chat doors,
+Phase 3c the release (`deploy`) and Phase 3d autopilot leases. The lint
+framework (3e) follows (§7).
 
 ## 4. The engine contract
 
@@ -244,6 +244,23 @@ approved single writes).
 5. **Report:** exit 0, or 3 with what broke; the restores, newest first, for
    the statements that have one.
 
+**Autopilot leases** (Phase 3d, `lease.py`): the developer delegating a
+session once instead of approving every write. `autopilot request` writes a
+card — the connection, the groups (default `source` and `comments`), how
+long, how many writes, whether destructive statements are included — with
+an 8-digit token. Nothing is delegated until the developer approves that
+card through any door, or runs `autopilot on` at a console. While the lease
+is active, `apply` and `deploy` land what it covers in one run, still
+snapshotted, rehearsed, verified and journaled. It never covers another
+connection, a connection marked protected (read fresh on every write), a
+group the card did not name, a destructive statement the card did not
+include, or an UPDATE or DELETE of more than 1000 rows. A lease that names a
+group lifts that group's `deny` while it is active, as its card says. It
+ends when it expires, is spent, is revoked (`autopilot off`, anyone's) or
+pauses itself: a write that breaks something, or five failures in a row.
+`autopilot report` lists every write under it, with the restores. A lease
+file that is missing, corrupt, unapproved or past its time is no lease.
+
 Three rules hold for every tier:
 
 1. **Refuse by tier, before connecting.** A command whose tier the engine
@@ -352,8 +369,9 @@ against a real database (a disposable container, never a shared one).
 | 2 · write · done | policy, tokens, grants, the console approval door, journal, the six steps, restore, the adversarial suite (`test_gate.py`) | PostgreSQL write tier: a dollar-quote-aware reader, the verified preview, overloads named, `search_path` refused, rows revalidated by ctid | every gate invariant is attacked in `test_gate.py`, and `live_check.py` runs preview → approve → confirm → restore on a real server: rows that moved and a verification that moved are rolled back, and a DROP COLUMN shows the function it would break |
 | 3a · harness · done | harness tier; the PreToolUse guard and the session brief, `install`, `doctor`, `skill lint`; the adversarial guard suite (`test_harness.py`) | `psql` guard patterns, the `pythia-pg-*` skills, install field-tested in a scratch project | every way around the gate the guard knows is denied in `test_harness.py`, and a scratch project installed by `pythia-pg install` passes `doctor` |
 | 3b · chat doors · done | the AskUserQuestion card and its answer hook, the MCP approver, local registration, doctor's door checks; the adversarial door suite (`test_doors.py`) | the doors in the skills and AGENTS.md | every way to mint without a person's Approve on the card is refused in `test_doors.py`, and the MCP server answers a real JSON-RPC session |
-| **3c · release (now)** | release tier, `deploy`: a release rehearsed and committed as one transaction under one approval; the adversarial suite (`test_release.py`) | `split_script` (dollar quotes, line numbers), the `pythia-pg-deploy` skill, a live release that adds a column and fills it | every way to land part of a release that was not approved as a whole is refused in `test_release.py`, and `live_check.py` lands and rolls back a release on a real server |
-| 3d · leases and lint | autopilot leases, lint framework | lint rules | a lease covers only what it names, and lint errors are never landed |
+| 3c · release · done | release tier, `deploy`: a release rehearsed and committed as one transaction under one approval; the adversarial suite (`test_release.py`) | `split_script` (dollar quotes, line numbers), the `pythia-pg-deploy` skill, a live release that adds a column and fills it | every way to land part of a release that was not approved as a whole is refused in `test_release.py`, and `live_check.py` lands and rolls back a release on a real server |
+| **3d · leases (now)** | autopilot leases: request, card, any door, coverage, pause, report; the adversarial suite (`test_lease.py`) | the `pythia-pg-autopilot` skill, a live write under a lease | every way to land a write a lease does not cover is refused in `test_lease.py` |
+| 3e · lint | lint framework (rules, severities, the conventions file), lint in the preview, autopilot never lands a lint error | lint rules | lint errors are shown in every preview and never landed unasked |
 | 4 · SQL Server | — | pythia-mssql: all tiers, `GO` splitting, `sp_refreshsqlmodule` verify | as Phase 1–3, for SQL Server |
 | 5 · MongoDB | groups that fit documents (validator, index, view, data) | pythia-mongo: command-document classification, validator verify by counting rejected documents | as Phase 1–3, for MongoDB |
 

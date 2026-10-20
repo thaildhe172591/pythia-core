@@ -20,7 +20,7 @@ import hashlib
 import json
 import sys
 
-from . import grants, journal, policy
+from . import grants, journal, lease, policy
 from .human import ci_variable, console_session, human_at_the_keyboard
 from .output import impact_summary, summary_lines
 
@@ -82,7 +82,7 @@ def approve_headless(engine):
             f"their own terminal:\n  {engine.command} approve <token>")
 
 
-def door_lines(engine, token, then):
+def door_lines(engine, token, then, confirm=True):
     from .doors import mcp_names
     return ["To apply, the developer approves — the first door that works, the "
             "next unasked if one fails:",
@@ -90,7 +90,7 @@ def door_lines(engine, token, then):
             f"`{engine.command} approve --card {token}`, options Approve / Reject",
             f"  2. the {mcp_names(engine)[1]} tool (MCP), with token {token}",
             f"  3. the developer's own terminal:  {engine.command} approve {token}",
-            f"  then the agent:  {then} --confirm {token}"]
+            f"  then the agent:  {then}" + (f" --confirm {token}" if confirm else "")]
 
 
 def grant_refusal(engine, st, token, grant, conn_name, then):
@@ -149,6 +149,9 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
     if group is None:
         sys.exit(why)
     action = policy.load(state)[group][0]
+    entry = getattr(ns, "conn_entry", None)
+    if action == "deny" and lease.names_group(state, ns.conn_name, entry, group):
+        action = "confirm"          # the lease card named it; it lasts while the lease does
     if action == "deny":
         extra = ("no snapshot can undo it after commit"
                  if group not in policy.UNDOABLE else "policy forbids it")
@@ -209,6 +212,14 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
             **(origin or {})}
     eid = journal.write_entry(state, otype, name, "\n\n".join(snap.values()),
                               text, meta)
+    auto_why = None
+    if not writing:
+        covered, auto_why = lease.covers(
+            state, ns.conn_name, entry, group, engine.destructive_reason(stmt, group),
+            row_set["count"] if row_set else None)
+        if covered:
+            via, writing = "autopilot", True
+            journal.update_entry(state, eid, autopilot=lease.read(state).get("token"))
 
     # 2. IMPACT — what depends on what is about to change
     summary = blind_impact = None
@@ -223,6 +234,8 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
     if outcome.get("error"):
         conn.rollback()
         journal.update_entry(state, eid, refused=True, error=outcome["error"])
+        if via == "autopilot":
+            lease.note_write(state, False, entry=eid, written=False)
         if writing:
             sys.exit(f"FAILED — nothing was written.\n  {outcome['error']}\nThe "
                      "approval is unspent: fix the cause and retry the same "
@@ -289,7 +302,9 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
                           "impact_blind_spots": blind_impact,
                           "rehearsal": rehearsal, "row_set": row_set,
                           "destructive": hurt, "warning": warn, "token": token,
-                          "journal": eid, "will_apply": False}, default=str))
+                          "journal": eid, "will_apply": False,
+                          "autopilot": {"covered": False, "why": auto_why}},
+                         default=str))
     elif not ns.json:
         _print_preview(group, obj, otype, schema, created, changed, summary,
                        blind_impact, rehearsal, row_set, hurt, warn, diff_text,
@@ -297,6 +312,9 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
     if not writing:
         if not ns.json:
             print()
+            if auto_why:
+                print(f"  ! not landed under autopilot — {auto_why}; this one "
+                      "needs its own approval.")
             for ln in door_lines(engine, token, then):
                 print(f"  {ln}")
         return 0
@@ -310,6 +328,11 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
     # 6. REPORT
     broken, own = rehearsal["broken"], rehearsal["own_errors"]
     ok = not broken and not own
+    after_lease = (lease.note_write(state, ok, len(broken) + len(own), eid)
+                   if via == "autopilot" else None)
+    if after_lease and not ns.json:
+        print(f"\n  Landed under the developer's autopilot lease — "
+              f"{lease.line(after_lease)}")
     undo = f"{cmd} journal restore {eid}" if group in policy.UNDOABLE else None
     drop_denied = created and policy.load(state)["structural"][0] == "deny"
     if ns.json:
@@ -405,6 +428,8 @@ def approval_card(engine, state, token):
     if len(str(token)) == 10:
         from . import release
         return release.approval_card(engine, state, token)
+    if len(str(token)) == 8:
+        return lease.approval_card(engine, state, token)
     entry, meta = journal.find_by_token(state, token)
     if not meta:
         sys.exit(f"No pending preview carries token {token!r}.\nApprove what "
@@ -456,6 +481,8 @@ def grant_approval(engine, state, token, meta, approver, session=None):
     """Record a person's Approve and say what the agent may do now. The
     console, the chat hook and the MCP elicitation all end here, so no door
     grants more than another."""
+    if meta.get("kind") == "lease-request":
+        return lease.activate(engine, state, meta, approver, session)
     grants.prune(state)
     grants.mint(state, token, meta.get("connection") or "",
                 revalidate=fingerprint_text(meta.get("row_set")),
@@ -469,7 +496,8 @@ def approve(engine, state, token, card_only=False, as_json=False):
     token = str(token or "").strip().lower()
     if not grants.valid_token(token):
         sys.exit(f"Not a pythia token: {token!r} — tokens are the hex digits "
-                 "a preview prints (6 for apply, 10 for deploy).")
+                 "a preview prints (6 for apply, 8 for an autopilot request, "
+                 "10 for deploy).")
     if not card_only and not console_session():
         sys.exit(approve_headless(engine))
     entry, meta, lines = approval_card(engine, state, token)
@@ -481,7 +509,16 @@ def approve(engine, state, token, card_only=False, as_json=False):
             print(f"{engine.command} approve {token}")
             print("\n".join(lines))
         return 0
-    grant_approval(engine, state, token, meta, "console")
+    msg = grant_approval(engine, state, token, meta, "console")
+    if meta.get("kind") == "lease-request":
+        if as_json:
+            print(json.dumps({"ok": True, "token": token, "lease": lease.read(state)}))
+            return 0
+        print()
+        for ln in lines:
+            print(f"  {ln}")
+        print(f"\n  {msg}")
+        return 0
     rec = grants.read(state, token)
     if as_json:
         print(json.dumps({"ok": True, "token": token, "entry": entry,
