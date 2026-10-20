@@ -1,8 +1,8 @@
 # The pythia family — design
 
-Status: **Phase 4a** (October 2026). This document is the plan; the code in
-this repository is its first eight steps — Phase 3 is complete — and
-pythia-mssql has begun on it. Where the two disagree, the code is what
+Status: **Phase 4c** (October 2026). This document is the plan; the code in
+this repository is its first nine steps — Phase 3 is complete — and
+pythia-mssql reads and writes on it. Where the two disagree, the code is what
 runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
@@ -140,7 +140,12 @@ Core owns the transaction and the six steps (`gate.py`):
    journal before anything runs.
 2. **Impact** — the read tier's `dependents`, with its blind spots.
 3. **Rehearse** — run, verify, roll back. A statement that fails here has
-   nothing to approve.
+   nothing to approve. A rehearsal that **escaped** — the engine saw its
+   transaction end inside the statement, as a SQL Server trigger's `COMMIT`
+   ends it — is never "nothing was written": core rolls back what is left,
+   journals the entry as `escaped`, spends the approval, pauses a lease,
+   prints the restore and exits 3. In a release it names every statement
+   up to that one, since one transaction held them all.
 4. **Preview** — the diff between the definition before and after (both as
    the database prints them, so formatting is no noise), the rehearsal, the
    rows, the warnings, and a token over the file, the object as it stood
@@ -163,7 +168,10 @@ The policy groups are `source`, `comments`, `data_dml`, `structural`,
 **Harness tier** (settled in Phase 3a): `raw_client_pattern`,
 `write_sql_pattern`, `script_pattern`, `connections_template`,
 `skills_dir`. Core turns them into four commands that touch no database
-(`harness.py`, `install.py`, `skills.py`):
+(`harness.py`, `install.py`, `skills.py`). The chat doors need them too:
+an engine without this tier has no `install`, so no hook reads a chat
+answer and no MCP approver is registered, and its previews name only the
+developer's terminal.
 
 - `hook pre-tool`, the PreToolUse guard. It **denies** the engine's raw
   client (named anywhere in the command) given write SQL or a script (its
@@ -308,6 +316,7 @@ does this for PostgreSQL.
 | Who depends on it | `ALL_DEPENDENCIES` (+ PL/Scope) | `pg_depend` / `pg_rewrite` for views and SQL-standard bodies (`BEGIN ATOMIC`, 14+). PL/pgSQL bodies are not tracked: text search plus `plpgsql_check`, and the gap is named | `sys.sql_expression_dependencies`; dynamic SQL and deferred names are blind spots | view pipelines (`viewOn`, `$lookup`, `$unionWith`); application code is invisible, and the report says so |
 | "Broken" after a write | `INVALID` status, `ALL_ERRORS` | no status. Syntax is checked at CREATE; semantics only by `plpgsql_check` when installed, or at run time | no status. `sys.dm_sql_referenced_entities` binds a module now and raises what is missing (207, or 2020 with the missing names in `sys.sql_expression_dependencies`) without ending the open transaction. `sp_refreshsqlmodule` is not usable inside a rehearsal: when it fails it rolls back the caller's whole transaction | after a validator change: count documents the new validator rejects |
 | DDL inside a transaction | no (implicit commit) | yes, except a few (`CREATE INDEX CONCURRENTLY`, `VACUUM`, `CREATE DATABASE`, ...) | yes, except a few (`ALTER DATABASE`, full-text, ...) | no for `collMod` and indexes |
+| A trigger can end the caller's transaction | no: a trigger cannot commit (an autonomous-transaction trigger commits only its own work) | no: a trigger cannot `COMMIT` | yes: a trigger's `COMMIT` or `ROLLBACK` ends it (error 3609). pythia-mssql rehearses one transaction level down, so a single `COMMIT` commits nothing; a transaction that ended anyway is `escaped` (exit 3) unless the database's triggers show it was rolled back | not applicable |
 | Read-only session | `SET TRANSACTION READ ONLY` | `default_transaction_read_only` (psycopg `read_only`). `dblink`/FDW reach past it | none (`SET TRANSACTION READ ONLY` is a syntax error): a least-privilege login (`db_datareader`, `VIEW DEFINITION`) is the line, and a read command's transaction is never committed | none: a user holding only the `read` role |
 | Row-set check before DML | count + `ORA_HASH` fingerprint | count + order-independent aggregate of `md5(row::text)` | count + `CHECKSUM_AGG(BINARY_CHECKSUM(*))` | `countDocuments` + fingerprint of matched `_id`s |
 | Plan without running | `EXPLAIN PLAN` + `DBMS_XPLAN` | `EXPLAIN` without `ANALYZE` (`ANALYZE` executes: refused) | `SET SHOWPLAN_XML ON` | `explain("queryPlanner")` (`executionStats` executes: refused) |
@@ -384,9 +393,9 @@ against a real database (a disposable container, never a shared one).
 | 3c · release · done | release tier, `deploy`: a release rehearsed and committed as one transaction under one approval; the adversarial suite (`test_release.py`) | `split_script` (dollar quotes, line numbers), the `pythia-pg-deploy` skill, a live release that adds a column and fills it | every way to land part of a release that was not approved as a whole is refused in `test_release.py`, and `live_check.py` lands and rolls back a release on a real server |
 | 3d · leases · done | autopilot leases: request, card, any door, coverage, pause, report; the adversarial suite (`test_lease.py`) | the `pythia-pg-autopilot` skill, a live write under a lease | every way to land a write a lease does not cover is refused in `test_lease.py` |
 | 3e · lint · done | lint tier and framework (rules, severities, naming patterns in lint.json, the conventions file), lint in every preview and card, autopilot never lands a lint error; `test_lint.py` | PostgreSQL rules: SECURITY DEFINER without `search_path`, `SELECT *` in stored code, `timestamp` without time zone, `char(n)`, `money`, `serial`, `NOT IN (subquery)`, a table without a comment in the change (a RAISE argument mismatch is left to the rehearsal: PostgreSQL rejects it itself) | lint errors are shown in every preview and never landed unasked |
-| **4a · SQL Server reads (now)** | — | pythia-mssql: the driver spike (§8), connect and read tiers, `errors` through `sys.dm_sql_referenced_entities`, tables rebuilt by `ddl`; CI against SQL Server 2022 in a service container | every read command passes against a fixture on a real server as a least-privilege login, and `ddl` rebuilds what it describes |
-| 4b · SQL Server writes | — | the write tier: a T-SQL reader (`N''`, `[ ]`, nested comments, `GO`), classification, the rehearsal verified by binding modules before and after, rows revalidated by `CHECKSUM_AGG` | as Phase 2, for SQL Server |
-| 4c · SQL Server harness | — | harness, release (`GO` batches) and lint tiers, the `pythia-mssql-*` skills | as Phase 3, for SQL Server |
+| 4a · SQL Server reads · done | — | pythia-mssql: the driver spike (§8), connect and read tiers, `errors` through `sys.dm_sql_referenced_entities`, tables rebuilt by `ddl`; CI against SQL Server 2022 in a service container | every read command passes against a fixture on a real server as a least-privilege login, and `ddl` rebuilds what it describes |
+| 4b · SQL Server writes · done | `escaped`: a rehearsal whose transaction ended inside the statement is never called unwritten — exit 3, the approval spent, a lease paused; previews name only the doors an engine has | the write tier: a T-SQL reader (`N''`, `[ ]`, nested comments, `GO`), classification, the rehearsal verified by binding modules before and after and run one transaction level down (a trigger's `COMMIT` commits nothing), rows revalidated by `CHECKSUM_AGG` | as Phase 2, for SQL Server — and a trigger that commits past the rehearsal is reported as written, on a real server |
+| **4c · SQL Server harness (now)** | — | harness, release (`GO` batches) and lint tiers, the `pythia-mssql-*` skills | as Phase 3, for SQL Server |
 | 5 · MongoDB | groups that fit documents (validator, index, view, data) | pythia-mongo: command-document classification, validator verify by counting rejected documents | as Phase 1–3, for MongoDB |
 
 Not planned: moving pythia for Oracle onto pythia-core. That would be the

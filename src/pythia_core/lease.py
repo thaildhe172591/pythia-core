@@ -290,6 +290,17 @@ def note_write(state, ok, broken=0, entry=None, written=True, count=1, now=None)
     return rec
 
 
+def pause(state, reason, entry=None, now=None):
+    """Stop the lease until the developer looks; None when there is none."""
+    rec = read(state)
+    if not rec or rec.get("revoked_at"):
+        return None
+    rec["paused"] = {"reason": reason, "entry": entry,
+                     "at": _iso(now or datetime.datetime.now())}
+    write(state, rec)
+    return rec
+
+
 def revoke(state, now=None):
     rec = read(state)
     if not rec or rec.get("revoked_at"):

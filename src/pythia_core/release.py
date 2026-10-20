@@ -125,6 +125,16 @@ def preflight(engine, state, statements, lifted=lambda group: False):
 
 # --- one pass over the release, inside one transaction ---------------------------------
 
+class Escaped(Exception):
+    """A member's rehearsal ended the engine's transaction: what ran so far
+    may already be committed."""
+
+    def __init__(self, n, where, outcome, members, undo):
+        super().__init__(outcome["escaped"])
+        self.n, self.where, self.outcome = n, where, outcome
+        self.members, self.undo = members, undo
+
+
 def run_members(engine, conn, ns, statements, then, batch=None):
     """Snapshot, measure, rehearse and verify every statement in order, in
     the open transaction; never commits or rolls back itself. Returns the
@@ -157,6 +167,10 @@ def run_members(engine, conn, ns, statements, then, batch=None):
             if found is not None:
                 summary = impact_summary(found[0], schema)
         outcome = engine.rehearse(conn, schema, st["group"], stmt, ident, snap)
+        if outcome.get("escaped"):
+            undo = gate.mark_escape(engine, state, eid, st["group"], ident, snap,
+                                    outcome, name)
+            raise Escaped(st["n"], where, outcome, members, undo)
         if outcome.get("error"):
             journal.update_entry(state, eid, refused=True, error=outcome["error"])
             return members, f"{where}: {outcome['error']}"
@@ -269,8 +283,11 @@ def run_deploy(engine, conn, ns):
         approved = _check_approval(engine, state, ns, confirm, statements, then)
     writing = bool(confirm or ns.yes)
 
-    members, error = run_members(engine, conn, ns, statements, then,
-                                 batch=confirm)
+    try:
+        members, error = run_members(engine, conn, ns, statements, then,
+                                     batch=confirm)
+    except Escaped as esc:
+        return _report_escape(engine, conn, ns, esc, confirm)
     for m in members:
         m["lint"] = [f for f in findings if f["n"] == m["n"]]
     if error:
@@ -337,6 +354,40 @@ def run_deploy(engine, conn, ns):
         if not ns.json:
             print(f"\n  Landed under the developer's autopilot lease — {lease.line(after)}")
     return code
+
+
+def _report_escape(engine, conn, ns, esc, confirm):
+    """A trigger's COMMIT at statement n commits statements 1..n with it: the
+    release is never reported as rolled back. Exit 3, with every way back."""
+    conn.rollback()
+    state = ns.state
+    for m in esc.members:
+        journal.update_entry(state, m["entry"], escaped=f"statement {esc.n} escaped "
+                             f"the release's transaction: {esc.outcome['escaped']}")
+    if confirm:
+        grants.spend(state, confirm)          # one approval, one run
+    lease.pause(state, f"a release escaped its transaction at statement {esc.n} "
+            f"({esc.outcome['escaped']})")
+    undos = [u for u in [esc.undo] + [
+        f"{engine.command} journal restore {m['entry']}"
+        for m in reversed(esc.members) if m["group"] in policy.UNDOABLE] if u]
+    if ns.json:
+        print(json.dumps({"ok": False, "applied": None,
+                          "escaped": {"n": esc.n, "where": esc.where,
+                                      "why": esc.outcome["escaped"],
+                                      "error": esc.outcome.get("error")},
+                          "restore": undos, "exit": 3}))
+        return 3
+    print(f"\n  WRITTEN? — {esc.where}: {engine.label} ended pythia's transaction "
+          f"inside it: {esc.outcome['escaped']}.")
+    if esc.outcome.get("error"):
+        print(f"    {esc.outcome['error']}")
+    span = f"statements 1-{esc.n}" if esc.n > 1 else "statement 1"
+    print(f"  The release ran in one transaction, so {span} may already be "
+          f"committed{'' if confirm else ' — nobody approved that'}, and pythia "
+          "can no longer roll them back. Look before anything else.")
+    gate.escape_footer(engine, undos, journal.root(state))
+    return 3
 
 
 def _check_approval(engine, state, ns, confirm, statements, then):

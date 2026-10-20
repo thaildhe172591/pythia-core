@@ -86,7 +86,10 @@ WRITE = (
     "rehearse",         # (conn, schema, group, stmt, ident, snapshot) -> run
                         #    it inside the open transaction and verify:
                         #    {error, object, type, after, rows, broken,
-                        #    own_errors, verified, blind, notes}
+                        #    own_errors, verified, blind, notes}; with
+                        #    `escaped` (why) when the engine's transaction
+                        #    ended inside the statement — a trigger's COMMIT
+                        #    — so what ran may already be committed
     "restore_statement",  # (group, ident, before, outcome) -> the statement
                         #    that puts it back (a DROP for a new object)
     "privilege_warning",  # (conn, schema) -> one line when the account can

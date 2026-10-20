@@ -154,6 +154,7 @@ class WriteConn(FakeConn):
         self.fail = None           # error text the next rehearsal raises
         self.rowcount = None       # a rowcount that differs from the probe
         self.on_execute = None     # hook run as a rehearsal executes
+        self.escape = None         # a trigger that commits: the next rehearsal escapes
 
     def commit(self):
         self.commits += 1
@@ -257,6 +258,11 @@ class FakeWriteEngine(FakeReadEngine):
             label = next(iter(snapshot), f"{ident['name']}()")
             conn.pending.append(("objects", label, stmt))
             out.update(object=label, type="FUNCTION")
+            if conn.escape:            # committed by the trigger, outside any approval
+                conn.objects[label] = stmt
+                conn.pending = [x for x in conn.pending if x[1] != label]
+                return {"error": "the transaction ended in the trigger",
+                        "escaped": conn.escape, "object": label, "type": "FUNCTION"}
         elif group == "comments":
             text = stmt.split("'")[1]
             conn.pending.append(("comments", ident["name"], text))

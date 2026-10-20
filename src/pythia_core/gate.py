@@ -73,8 +73,19 @@ def headless_yes(engine):
             f"(Real pipelines set {ci_variable(engine)}=1.)")
 
 
+def has_doors(engine):
+    """The chat doors need `install`: a hook that reads the AskUserQuestion
+    answer, an MCP approver registered with the client. An engine without
+    the harness tier has neither, so only the terminal door can approve."""
+    return not missing(engine, "harness")
+
+
 def approve_headless(engine):
     from .doors import mcp_names
+    if not has_doors(engine):
+        return (f"approve is the developer's command — it needs a real console.\n"
+                "The developer runs it in their own terminal:\n"
+                f"  {engine.command} approve <token>")
     return (f"approve is the developer's command — it needs a real console.\n"
             "From chat, the developer approves through a door instead — the "
             "first that works, the next unasked if one fails: AskUserQuestion "
@@ -85,6 +96,10 @@ def approve_headless(engine):
 
 def door_lines(engine, token, then, confirm=True):
     from .doors import mcp_names
+    if not has_doors(engine):
+        return ["To apply, the developer approves in their own terminal:",
+                f"  {engine.command} approve {token}",
+                f"then the agent:  {then}" + (f" --confirm {token}" if confirm else "")]
     return ["To apply, the developer approves — the first door that works, the "
             "next unasked if one fails:",
             f"  1. AskUserQuestion (Claude Code), its text exactly the output of "
@@ -235,6 +250,9 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
 
     # 3. REHEARSE — inside a transaction; rolled back unless this run writes
     outcome = engine.rehearse(conn, schema, group, stmt, ident, snap)
+    if outcome.get("escaped"):
+        return report_escape(engine, conn, ns, eid, group, ident, snap, outcome,
+                             name, confirm)
     if outcome.get("error"):
         conn.rollback()
         journal.update_entry(state, eid, refused=True, error=outcome["error"])
@@ -374,6 +392,62 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
                   "deny, so it will be refused.\n  The developer decides: "
                   f"{cmd} policy set structural confirm")
     return 0 if ok else 3
+
+
+def mark_escape(engine, state, eid, group, ident, snap, outcome, name):
+    """Journal a statement whose rehearsal escaped the transaction, with the
+    restore its snapshot allows; the restore command, or None."""
+    obj = outcome.get("object") or name
+    before = snap.get(obj, "") if ident else ""
+    restore = ""
+    if group in policy.UNDOABLE and ident:
+        restore = engine.restore_statement(group, ident, before, outcome)
+    known = {"type": outcome["type"]} if outcome.get("type") else {}
+    journal.update_entry(state, eid, before=before if ident else None,
+                         restore=restore, object=obj, escaped=outcome["escaped"],
+                         error=outcome.get("error"), **known)
+    return f"{engine.command} journal restore {eid}" if restore.strip() else None
+
+
+def report_escape(engine, conn, ns, eid, group, ident, snap, outcome, name,
+                  confirm):
+    """The engine's transaction ended inside the statement — a trigger that
+    commits, say. What ran may already be committed, approved or not, so it
+    is never reported as unwritten: exit 3, with the way back."""
+    conn.rollback()
+    state = ns.state
+    undo = mark_escape(engine, state, eid, group, ident, snap, outcome, name)
+    if confirm:
+        grants.spend(state, confirm)          # one approval, one run
+    lease.pause(state, f"a statement escaped the transaction ({outcome['escaped']})",
+                eid)
+    if ns.json:
+        print(json.dumps({"ok": False, "applied": None, "escaped": outcome["escaped"],
+                          "error": outcome.get("error"), "object": outcome.get("object") or name,
+                          "restore": undo, "journal": eid, "exit": 3}))
+        return 3
+    print(f"\n  WRITTEN? — {engine.label} ended pythia's transaction inside the "
+          f"statement: {outcome['escaped']}.")
+    if outcome.get("error"):
+        print(f"    {outcome['error']}")
+    print(f"  What ran may already be committed{'' if confirm else ' — nobody approved that'}, "
+          "and pythia can no longer roll it back. Look at it before anything else.")
+    escape_footer(engine, [undo] if undo else [], journal.root(state) / eid)
+    return 3
+
+
+def escape_footer(engine, undos, where):
+    if len(undos) > 1:
+        print("\n  If they landed, these put back the snapshots taken before they "
+              "ran, newest first (each a write like any other — it previews first):")
+    elif undos:
+        print("\n  If it landed, this puts back the snapshot taken before it ran "
+              "(a write like any other — it previews first):")
+    else:
+        print(f"\n  There is no snapshot to restore from — the journal kept the "
+              f"statement that ran, in {where}.")
+    for u in undos:
+        print(f"    {u}")
 
 
 def lint_one(engine, state, name, text, group):

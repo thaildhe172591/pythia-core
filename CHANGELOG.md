@@ -1,7 +1,22 @@
 # Changelog
 
-## Unreleased — documentation
+## 0.9.0.dev0 — unreleased
 
+Phase 4b of the plan in DESIGN.md: what SQL Server's writes needed from the
+core.
+
+- **A rehearsal that escaped its transaction is never called unwritten.** An
+  engine's `rehearse` may return `escaped` (why) when its transaction ended
+  inside the statement — on SQL Server a trigger's `COMMIT` can end it, and
+  commit what ran before anyone approved it. `apply` and `deploy` then roll
+  back what is left, journal the entries as `escaped`, spend the approval,
+  pause an autopilot lease, print every restore and exit 3. A release names
+  each statement up to the one that escaped. `lease.pause()` is new.
+  Adversarial tests in `test_gate.py`, `test_release.py`, `test_lease.py`.
+- **An engine without the harness tier offers only the terminal door.** Its
+  previews, refusals and `approve` no longer name AskUserQuestion or the
+  MCP tool: without `install` nothing turns those answers into a grant, and
+  a developer clicking Approve in a dialog that does nothing is told a lie.
 - **DESIGN.md §8: the SQL Server driver is settled — pymssql**, with the
   spike's evidence for each candidate. §5 now verifies SQL Server modules
   with `sys.dm_sql_referenced_entities`: `sp_refreshsqlmodule` rolls back the
@@ -10,6 +25,8 @@
   lists a RAISE rule the PostgreSQL engine leaves to the rehearsal.
 - `queries.py` says how an engine whose driver never turns `%%` into `%`
   keeps the one query contract.
+- DESIGN.md §5 says where SQL Server lets a trigger end the caller's
+  transaction, and the roadmap marks 4a and 4b done.
 
 ## 0.8.0.dev0 — unreleased
 

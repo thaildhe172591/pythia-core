@@ -197,6 +197,18 @@ def test_breakage_and_repeated_failure_pause_the_lease():
         assert "failed writes in a row" in lease.line(lease.read(p.state))
 
 
+def test_a_write_that_escaped_the_transaction_pauses_the_lease():
+    e = engine()
+    with project(e) as p:
+        grant_lease(p)
+        e.conn.escape = "a trigger ended the transaction"
+        code, out, _ = p.run("apply", p.file(NEW))
+        assert code == 3 and "WRITTEN?" in out
+        rec = lease.read(p.state)
+        assert lease.status(rec) == "paused"
+        assert "escaped" in lease.line(rec)
+
+
 def test_an_unapproved_or_forged_lease_file_lands_nothing():
     e = engine()
     with project(e) as p:

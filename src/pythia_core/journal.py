@@ -89,6 +89,8 @@ def find_by_token(state, token, kinds=("preview", "applied"), exclude=None):
 
 
 def kind(meta):
+    if meta.get("escaped"):
+        return "escaped"             # may be written: never a preview, never refused
     if meta.get("applied"):
         return "applied"
     if meta.get("refused"):

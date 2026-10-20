@@ -189,6 +189,34 @@ def test_a_failure_halfway_through_the_confirm_keeps_nothing_of_the_release():
         assert e.conn.commits == 1
 
 
+def test_a_member_that_escaped_the_transaction_takes_the_release_with_it():
+    # a trigger's COMMIT at statement 2 commits statement 1 too: the
+    # release is never reported as rolled back
+    e = engine()
+    with project(e) as p:
+        names = scripts(p, ("rel.sql", [COMMENT, FN]))
+        batch = preview(p, *names)["batch"]
+        p.approve(batch)
+        e.conn.escape = "a trigger ended the transaction"
+        code, out, why = p.run("deploy", *names, "--confirm", batch)
+        assert code == 3, (code, why, out)
+        assert "nothing was written" not in (out + why).lower()
+        for needle in ("WRITTEN?", "statement 2", "rel.sql:2",
+                       "a trigger ended the transaction", "statements 1-2",
+                       "may already be committed", "journal restore"):
+            assert needle in out, needle
+        assert grants.read(p.state, batch)["used_at"]            # one approval, one run
+        metas = [journal.read_entry(p.state, x)["meta"] for x in p.entries()]
+        escaped = [m for m in metas if m.get("escaped")]
+        assert len(escaped) == 2 and all(m.get("batch") == batch for m in escaped)
+        assert out.index("journal restore") < len(out)
+        assert e.conn.pending == []
+        code, out, _ = p.run("deploy", *names, "--json")
+        doc = json.loads(out.strip().splitlines()[-1])
+        assert code == 3 and doc["ok"] is False and doc["escaped"]["n"] == 2
+        assert len(doc["restore"]) == 2
+
+
 def test_an_approved_breakage_lands_and_exits_3():
     e = engine()
     e.conn.broken_after = [("v_report", "VIEW", "column total does not exist")]

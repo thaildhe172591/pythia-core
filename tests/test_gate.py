@@ -119,6 +119,22 @@ def test_preview_rehearses_rolls_back_and_writes_nothing():
         assert f"pythia-fake apply change.sql --confirm {doc['token']}" in out
 
 
+def test_an_engine_without_install_offers_only_the_terminal_door():
+    # no harness tier: no hook reads a chat answer, no MCP approver is
+    # registered — a door that cannot mint a grant is never offered
+    e = FakeWriteEngine()
+    with project(e) as p:
+        p.file(NEW)
+        code, out, _ = p.run("apply", "change.sql")
+        assert code == 0 and "pythia-fake approve " in out, out
+        assert "AskUserQuestion" not in out and "MCP" not in out, out
+        token = p.preview(NEW)["token"]
+        code, _, why = p.run("apply", "change.sql", "--confirm", token)
+        assert code == 1 and "AskUserQuestion" not in why and f"approve {token}" in why
+        code, _, why = p.run("approve", token)
+        assert code == 1 and "AskUserQuestion" not in why and "approve <token>" in why, why
+
+
 def test_snapshot_lands_on_disk_before_the_rehearsal_runs():
     e = FakeWriteEngine()
     e.conn.objects["f_total()"] = OLD
@@ -229,6 +245,41 @@ def test_approved_breakage_lands_as_written_but_broken():
         code, out, _ = p.run("apply", "change.sql", "--confirm", doc["token"])
         assert code == 3 and e.conn.commits == 1
         assert "broke" in out and "journal restore" in out
+
+
+def test_a_statement_that_escaped_the_transaction_is_never_called_unwritten():
+    # a trigger that commits ends the engine's transaction inside the
+    # statement: what ran may already be committed, approved or not
+    e = FakeWriteEngine()
+    e.conn.objects["f_total()"] = OLD
+    e.conn.escape = "a trigger ended the transaction"
+    with project(e) as p:
+        code, out, why = p.run("apply", p.file(NEW))
+        assert code == 3, (code, why, out)
+        assert "nothing was written" not in (out + why).lower()
+        for needle in ("WRITTEN?", "a trigger ended the transaction",
+                       "may already be committed", "nobody approved",
+                       "journal restore"):
+            assert needle in out, needle
+        eid = p.entries()[0]
+        entry = journal.read_entry(p.state, eid)
+        assert entry["meta"]["escaped"] == "a trigger ended the transaction"
+        assert journal.kind(entry["meta"]) == "escaped"
+        assert entry["restore"] == OLD and entry["before"] == OLD
+        assert e.conn.pending == [] and e.conn.rollbacks >= 1
+        code, out, _ = p.run("apply", "change.sql", "--json")
+        doc = json.loads(out.strip().splitlines()[-1])
+        assert code == 3 and doc["ok"] is False and doc["exit"] == 3
+        assert doc["escaped"] and doc["restore"].startswith("pythia-fake journal restore")
+        assert journal.find_by_token(p.state, doc.get("token") or "-")[0] is None
+        # the approval of a write that escaped is spent: one approval, one run
+        e.conn.escape = None
+        token = p.preview(NEW)["token"]
+        p.approve(token)
+        e.conn.escape = "a trigger ended the transaction"
+        code, out, _ = p.run("apply", "change.sql", "--confirm", token)
+        assert code == 3 and "WRITTEN?" in out
+        assert grants.read(p.state, token)["used_at"]
 
 
 def test_dml_revalidates_the_rows_and_the_rowcount():
