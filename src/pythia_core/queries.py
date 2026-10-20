@@ -15,6 +15,8 @@ literal percent sign is written `%%`. The danger is not only an error:
 psycopg 3.3 runs `select 'a%b'` with an empty dict as `select 'a$1'`, and
 says nothing. run_query always passes a dict, even
 an empty one, so that rule holds in every file whether it has binds or not.
+A driver that never turns `%%` back into `%` (pymssql) gets the file through
+its engine's loader, which does it once; the files keep one contract.
 """
 import re
 import sys

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — documentation
+
+- **DESIGN.md §8: the SQL Server driver is settled — pymssql**, with the
+  spike's evidence for each candidate. §5 now verifies SQL Server modules
+  with `sys.dm_sql_referenced_entities`: `sp_refreshsqlmodule` rolls back the
+  caller's whole transaction when it fails. The roadmap splits Phase 4 into
+  reads (4a), writes (4b) and the harness (4c), and the 3e row no longer
+  lists a RAISE rule the PostgreSQL engine leaves to the rehearsal.
+- `queries.py` says how an engine whose driver never turns `%%` into `%`
+  keeps the one query contract.
+
 ## 0.8.0.dev0 — unreleased
 
 Phase 3e of the plan in DESIGN.md: the lint framework. Phase 3 is complete.

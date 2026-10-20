@@ -1,7 +1,8 @@
 # The pythia family — design
 
-Status: **Phase 3e** (October 2026). This document is the plan; the code in
-this repository is its first eight steps: Phase 3 is complete. Where the two disagree, the code is what
+Status: **Phase 4a** (October 2026). This document is the plan; the code in
+this repository is its first eight steps — Phase 3 is complete — and
+pythia-mssql has begun on it. Where the two disagree, the code is what
 runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
@@ -28,11 +29,10 @@ learns that these packages exist.
 | pythia | `pythia-plsql` | `pythia` | `pythia` | python-oracledb | `.pythia/` (unchanged) |
 | pythia-core | `pythia-core` | `pythia_core` | — | none: stdlib only | — |
 | pythia-postgres | `pythia-postgres` | `pythia_postgres` | `pythia-pg` | psycopg 3 (`psycopg[binary]`) | `.pythia/postgres/` |
-| pythia-mssql | `pythia-mssql` | `pythia_mssql` | `pythia-mssql` | decided in Phase 4 (§8) | `.pythia/mssql/` |
+| pythia-mssql | `pythia-mssql` | `pythia_mssql` | `pythia-mssql` | pymssql (settled in Phase 4, §8) | `.pythia/mssql/` |
 | pythia-mongo | `pythia-mongo` | `pythia_mongo` | `pythia-mongo` | pymongo | `.pythia/mongo/` |
 
-All repositories are private while pre-alpha. None is on PyPI yet; install
-from git (each README says how).
+None is on PyPI yet; install from git (each README says how).
 
 ## 2. Living next to pythia for Oracle
 
@@ -306,9 +306,9 @@ does this for PostgreSQL.
 | Current source (the snapshot) | `ALL_SOURCE` | `pg_get_functiondef`, `pg_get_viewdef`, `pg_get_triggerdef` | `sys.sql_modules` / `OBJECT_DEFINITION` (NULL `WITH ENCRYPTION`: refuse) | `listCollections` options (validator, `viewOn`, `pipeline`), `listIndexes` |
 | Replace in place | `CREATE OR REPLACE` | `CREATE OR REPLACE`. A changed signature creates a second overload and leaves the old one; a changed return type needs a DROP | `CREATE OR ALTER` (2016 SP1+) | `collMod` for validators and views. On an index `collMod` changes only TTL and `hidden`; anything else is drop and create |
 | Who depends on it | `ALL_DEPENDENCIES` (+ PL/Scope) | `pg_depend` / `pg_rewrite` for views and SQL-standard bodies (`BEGIN ATOMIC`, 14+). PL/pgSQL bodies are not tracked: text search plus `plpgsql_check`, and the gap is named | `sys.sql_expression_dependencies`; dynamic SQL and deferred names are blind spots | view pipelines (`viewOn`, `$lookup`, `$unionWith`); application code is invisible, and the report says so |
-| "Broken" after a write | `INVALID` status, `ALL_ERRORS` | no status. Syntax is checked at CREATE; semantics only by `plpgsql_check` when installed, or at run time | no status. `sp_refreshsqlmodule` re-binds a module, run inside the write's transaction | after a validator change: count documents the new validator rejects |
+| "Broken" after a write | `INVALID` status, `ALL_ERRORS` | no status. Syntax is checked at CREATE; semantics only by `plpgsql_check` when installed, or at run time | no status. `sys.dm_sql_referenced_entities` binds a module now and raises what is missing (207, or 2020 with the missing names in `sys.sql_expression_dependencies`) without ending the open transaction. `sp_refreshsqlmodule` is not usable inside a rehearsal: when it fails it rolls back the caller's whole transaction | after a validator change: count documents the new validator rejects |
 | DDL inside a transaction | no (implicit commit) | yes, except a few (`CREATE INDEX CONCURRENTLY`, `VACUUM`, `CREATE DATABASE`, ...) | yes, except a few (`ALTER DATABASE`, full-text, ...) | no for `collMod` and indexes |
-| Read-only session | `SET TRANSACTION READ ONLY` | `default_transaction_read_only` (psycopg `read_only`). `dblink`/FDW reach past it | none for an ordinary database: least-privilege login (`db_datareader`) is the line | none: a user holding only the `read` role |
+| Read-only session | `SET TRANSACTION READ ONLY` | `default_transaction_read_only` (psycopg `read_only`). `dblink`/FDW reach past it | none (`SET TRANSACTION READ ONLY` is a syntax error): a least-privilege login (`db_datareader`, `VIEW DEFINITION`) is the line, and a read command's transaction is never committed | none: a user holding only the `read` role |
 | Row-set check before DML | count + `ORA_HASH` fingerprint | count + order-independent aggregate of `md5(row::text)` | count + `CHECKSUM_AGG(BINARY_CHECKSUM(*))` | `countDocuments` + fingerprint of matched `_id`s |
 | Plan without running | `EXPLAIN PLAN` + `DBMS_XPLAN` | `EXPLAIN` without `ANALYZE` (`ANALYZE` executes: refused) | `SET SHOWPLAN_XML ON` | `explain("queryPlanner")` (`executionStats` executes: refused) |
 | Script splitting | `;` and `/`, q-quotes, SQL*Plus directives refused | `;`, dollar quotes `$tag$`, `E''` strings; psql meta-commands (`\i`, `\gexec`) refused | `GO` separator (a client construct, not T-SQL); `CREATE PROCEDURE` must open its batch | one command document per file (Extended JSON). JavaScript is refused, as pythia refuses anonymous PL/SQL blocks |
@@ -383,8 +383,10 @@ against a real database (a disposable container, never a shared one).
 | 3b · chat doors · done | the AskUserQuestion card and its answer hook, the MCP approver, local registration, doctor's door checks; the adversarial door suite (`test_doors.py`) | the doors in the skills and AGENTS.md | every way to mint without a person's Approve on the card is refused in `test_doors.py`, and the MCP server answers a real JSON-RPC session |
 | 3c · release · done | release tier, `deploy`: a release rehearsed and committed as one transaction under one approval; the adversarial suite (`test_release.py`) | `split_script` (dollar quotes, line numbers), the `pythia-pg-deploy` skill, a live release that adds a column and fills it | every way to land part of a release that was not approved as a whole is refused in `test_release.py`, and `live_check.py` lands and rolls back a release on a real server |
 | 3d · leases · done | autopilot leases: request, card, any door, coverage, pause, report; the adversarial suite (`test_lease.py`) | the `pythia-pg-autopilot` skill, a live write under a lease | every way to land a write a lease does not cover is refused in `test_lease.py` |
-| **3e · lint (now)** | lint tier and framework (rules, severities, naming patterns in lint.json, the conventions file), lint in every preview and card, autopilot never lands a lint error; `test_lint.py` | PostgreSQL rules: SECURITY DEFINER without `search_path`, RAISE placeholders that do not match their arguments, `SELECT *` in stored code, `timestamp` without time zone, `char(n)`, `money`, `serial`, `NOT IN (subquery)`, a table without a comment in the change | lint errors are shown in every preview and never landed unasked |
-| 4 · SQL Server | — | pythia-mssql: all tiers, `GO` splitting, `sp_refreshsqlmodule` verify | as Phase 1–3, for SQL Server |
+| 3e · lint · done | lint tier and framework (rules, severities, naming patterns in lint.json, the conventions file), lint in every preview and card, autopilot never lands a lint error; `test_lint.py` | PostgreSQL rules: SECURITY DEFINER without `search_path`, `SELECT *` in stored code, `timestamp` without time zone, `char(n)`, `money`, `serial`, `NOT IN (subquery)`, a table without a comment in the change (a RAISE argument mismatch is left to the rehearsal: PostgreSQL rejects it itself) | lint errors are shown in every preview and never landed unasked |
+| **4a · SQL Server reads (now)** | — | pythia-mssql: the driver spike (§8), connect and read tiers, `errors` through `sys.dm_sql_referenced_entities`, tables rebuilt by `ddl`; CI against SQL Server 2022 in a service container | every read command passes against a fixture on a real server as a least-privilege login, and `ddl` rebuilds what it describes |
+| 4b · SQL Server writes | — | the write tier: a T-SQL reader (`N''`, `[ ]`, nested comments, `GO`), classification, the rehearsal verified by binding modules before and after, rows revalidated by `CHECKSUM_AGG` | as Phase 2, for SQL Server |
+| 4c · SQL Server harness | — | harness, release (`GO` batches) and lint tiers, the `pythia-mssql-*` skills | as Phase 3, for SQL Server |
 | 5 · MongoDB | groups that fit documents (validator, index, view, data) | pythia-mongo: command-document classification, validator verify by counting rejected documents | as Phase 1–3, for MongoDB |
 
 Not planned: moving pythia for Oracle onto pythia-core. That would be the
@@ -394,16 +396,27 @@ owner's decision, taken after Phase 3, when there is a core worth moving to.
 
 Each is asked when its phase starts, not guessed now:
 
-1. **SQL Server driver.** pyodbc (mature, needs Microsoft's ODBC driver
-   installed), pymssql (wheels bundle FreeTDS), python-tds (pure Python,
-   less active) or Microsoft's newer `mssql-python`. Settle with a spike at
-   Phase 4 against Windows, macOS and Linux CI.
+1. **SQL Server driver — settled: pymssql.** The Phase 4 spike, against
+   SQL Server 2022:
+   - pymssql 2.4: wheels with FreeTDS inside for Windows, macOS and Linux
+     on Python 3.9–3.13, so nothing else needs installing; every server
+     error raised with its number; pyformat binds; TLS with `encryption`.
+     It never turns `%%` into `%`, and it reads `%(` as a placeholder even
+     inside a literal: pythia-mssql's loader adapts, and its suite checks.
+   - python-tds 1.17 (pure Python): an error from `sp_refreshsqlmodule`
+     was not raised — it sat in `cursor.messages` while the transaction it
+     ended was gone. A gate that must never call a broken result clean
+     cannot use it.
+   - mssql-python: wheels only for Python 3.10 and later; the family floor
+     is 3.9.
+   - pyodbc: wheels everywhere, but every machine needs Microsoft's ODBC
+     driver installed by hand.
 2. **Minimum versions.** PostgreSQL 13 or 14 (14 brings `BEGIN ATOMIC`
    dependency tracking and `CREATE OR REPLACE TRIGGER`). SQL Server 2016 SP1
    or 2019. MongoDB 6 or 7.
 3. **`plpgsql_check`.** Optional and detected (the current plan), or
    required for any write the gate calls "verified"?
-4. **Publishing.** When the repositories go public, and whether `pythia-core`
-   and the engine names are free on PyPI at that point.
+4. **Publishing.** Whether `pythia-core` and the engine names are free on
+   PyPI when the family is published there.
 5. **Vietnamese documentation.** pythia ships README.vi.md and GUIDE.vi.md.
    The family should too, from its first release.

@@ -1,8 +1,9 @@
 # pythia-core
 
 The part of pythia that is the same for every database. Engine packages
-build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres)
-first, then SQL Server and MongoDB.
+build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres),
+[pythia-mssql](https://github.com/thaildhe172591/pythia-mssql) (pre-alpha:
+reads), then MongoDB.
 
 **Pre-alpha (Phase 3e).** What is here today:
 - the engine contract and its conformance check;
