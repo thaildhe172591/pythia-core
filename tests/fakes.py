@@ -135,3 +135,147 @@ class FakeReadEngine(FakeEngine):
 
     def compile_errors(self, conn, schema, name):
         return list(self._errors), self._error_note
+
+
+class WriteConn(FakeConn):
+    """A database holding code objects and table rows, with one transaction:
+    what a rehearsal stages lands on commit and vanishes on rollback."""
+
+    def __init__(self):
+        super().__init__()
+        self.objects = {}          # label -> definition, committed
+        self.comments = {}         # table -> comment, committed
+        self.rows = {}             # table -> [ids], committed
+        self.pending = []          # staged changes
+        self.commits = self.rollbacks = 0
+        self.rehearsed = []        # every statement a rehearsal ran
+        self.broken_after = []     # findings the next rehearsal reports
+        self.own_after = []
+        self.fail = None           # error text the next rehearsal raises
+        self.rowcount = None       # a rowcount that differs from the probe
+        self.on_execute = None     # hook run as a rehearsal executes
+
+    def commit(self):
+        self.commits += 1
+        for kind, key, value in self.pending:
+            getattr(self, kind)[key] = value
+        self.pending = []
+
+    def rollback(self):
+        self.rollbacks += 1
+        self.pending = []
+
+
+class FakeWriteEngine(FakeReadEngine):
+    """FakeReadEngine plus the write tier, over a WriteConn."""
+    rollback_notes = {"source": "Yes — the definition is snapshotted.",
+                      "comments": "Yes — the comment is snapshotted.",
+                      "data_dml": "No.", "structural": "No.",
+                      "grants": "By hand.", "session": "Not needed."}
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.conn = WriteConn()
+
+    def classify(self, text):
+        import re
+        low = " ".join(text.lower().split())
+        if low.startswith("create or replace function"):
+            return "source", None
+        if low.startswith("comment on table"):
+            return "comments", None
+        if re.match(r"(delete|update|insert)\b", low):
+            return "data_dml", None
+        if re.match(r"(drop|alter|create)\b", low):
+            return "structural", None
+        if low.startswith("grant"):
+            return "grants", None
+        if low.startswith("set "):
+            return "session", None
+        if low.startswith("do "):
+            return None, "Anonymous blocks are refused."
+        return None, "Cannot classify this statement, so it is refused."
+
+    def prepare_statement(self, text, group):
+        return text.strip().rstrip(";").strip()
+
+    def parse_object(self, stmt, group):
+        import re
+        if group == "source":
+            m = re.match(r"create or replace function\s+(?:(\w+)\.)?(\w+)", stmt, re.I)
+            return {"type": "FUNCTION", "name": m.group(2).lower(),
+                    "schema": (m.group(1) or "").lower() or None}
+        if group == "comments":
+            m = re.match(r"comment on table\s+(\w+)\s+is\s+'(.*)'", stmt, re.I)
+            return {"type": "COMMENT", "name": m.group(1).lower(), "schema": None}
+        return None
+
+    def destructive_reason(self, stmt, group):
+        low = stmt.lower()
+        if group == "data_dml" and low.startswith("delete") and " where " not in low:
+            return "no WHERE clause — it touches every row in the table"
+        if group == "structural" and low.startswith("drop"):
+            return "DROP removes the object and everything in it"
+        return None
+
+    def dml_probe(self, stmt):
+        import re
+        m = re.match(r"delete from (\w+)(?: where (.+))?$", stmt, re.I)
+        return (m.group(1), m.group(2)) if m else None
+
+    def _selected(self, conn, target, pred):
+        ids = conn.rows.get(target, [])
+        if pred and pred.startswith("id <"):
+            ids = [i for i in ids if i < int(pred.split("<")[1])]
+        return ids
+
+    def measure_row_set(self, conn, target, pred):
+        ids = self._selected(conn, target, pred)
+        return {"target": target, "predicate": pred or "", "count": len(ids),
+                "hash": ",".join(map(str, sorted(ids))), "columns": ["ID"],
+                "sample": [[i] for i in ids[:10]], "truncated": len(ids) > 10}
+
+    def snapshot(self, conn, schema, group, ident):
+        if group == "source":
+            return {k: v for k, v in conn.objects.items()
+                    if k.split("(")[0] == ident["name"]}
+        if group == "comments":
+            return {ident["name"]: conn.comments.get(ident["name"], "")}
+        return {}
+
+    def rehearse(self, conn, schema, group, stmt, ident, snapshot):
+        if conn.on_execute:
+            conn.on_execute(stmt)
+        conn.rehearsed.append(stmt)
+        if conn.fail:
+            return {"error": conn.fail}
+        out = {"error": None, "object": None, "type": None, "after": stmt,
+               "rows": None, "broken": list(conn.broken_after),
+               "own_errors": list(conn.own_after), "verified": True,
+               "blind": None, "notes": []}
+        if group == "source":
+            label = next(iter(snapshot), f"{ident['name']}()")
+            conn.pending.append(("objects", label, stmt))
+            out.update(object=label, type="FUNCTION")
+        elif group == "comments":
+            text = stmt.split("'")[1]
+            conn.pending.append(("comments", ident["name"], text))
+            out.update(object=ident["name"], type="COMMENT", after=text)
+        elif group == "data_dml":
+            probe = self.dml_probe(stmt)
+            gone = self._selected(conn, *probe) if probe else []
+            left = [i for i in conn.rows.get(probe[0], []) if i not in gone] if probe else []
+            if probe:
+                conn.pending.append(("rows", probe[0], left))
+            out["rows"] = conn.rowcount if conn.rowcount is not None else len(gone)
+        return out
+
+    def restore_statement(self, group, ident, before, outcome):
+        if group == "comments":
+            return f"comment on table {ident['name']} is '{before}'"
+        if before:
+            return before
+        return f"drop function {outcome['object']}"
+
+    def privilege_warning(self, conn, schema):
+        return None

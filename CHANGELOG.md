@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.3.0.dev0 — unreleased
+
+Phase 2 of the plan in DESIGN.md: the write gate, pythia's Do movement.
+
+- **`apply` runs the six steps for engines whose DDL runs in a
+  transaction.** Snapshot to the journal, impact, rehearse (run, verify,
+  roll back), preview, commit, report. The preview diffs the definition
+  before and after as the database prints both, shows what the rehearsal
+  broke, the row set, the warnings, and a token.
+- **A write commits only as approved.** `--confirm <token>` needs the
+  developer's grant, which is checked before anything runs. The confirm run
+  rehearses again and commits only if the token, the row count and the
+  verification still match the approved preview; otherwise it rolls back
+  and names what moved. A breakage the developer saw and approved lands,
+  and exits 3.
+- **`approve` is the developer's, at a real console.** It prints the card
+  (object, rehearsal, rows, warnings) from the preview's journal entry and
+  mints a single-use, 15-minute grant bound to the connection. `--card`
+  prints the card and mints nothing. The chat doors arrive in Phase 3.
+- **`policy`:** pythia's groups and defaults, under
+  `.pythia/<engine>/policy.json`. Loosening needs a person at a console.
+  `allow` is refused for every group but `session`.
+- **`journal list | show | restore`, `history`:** every preview and write
+  on disk. A restore is a write: previewed, approved, confirmed.
+- **The write tier is settled:** `classify`, `prepare_statement`,
+  `parse_object`, `destructive_reason`, `dml_probe`, `measure_row_set`,
+  `snapshot`, `rehearse`, `restore_statement`, `privilege_warning`.
+- **SECURITY.md** says what each gate stops and what it does not.
+- **`tests/test_gate.py`** attacks every invariant through a fake engine
+  with a real transaction. Writing it found a hole before it shipped: a
+  confirm run compared its verification with its own journal entry rather
+  than the approved preview, so a verification that moved would have
+  passed. The run now excludes its own entry.
+
 ## 0.2.0.dev0 — unreleased
 
 Phase 1 of the plan in DESIGN.md: the read commands, pythia's Learn movement.

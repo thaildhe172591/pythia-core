@@ -4,16 +4,21 @@ The part of pythia that is the same for every database. Engine packages
 build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres)
 first, then SQL Server and MongoDB.
 
-**Pre-alpha (Phase 1).** What is here today:
+**Pre-alpha (Phase 2).** What is here today:
 - the engine contract and its conformance check;
 - per-engine connection resolution;
 - the query-contract lint;
-- the commands every engine's command line inherits: `version`,
-  `connections`, `check`, and the read commands `ls`, `src`, `cols`, `ddl`,
-  `grep`, `deps`, `impact` and `errors`, windowed and never truncated
-  silently.
+- the commands every engine's command line inherits:
+  - `version`, `connections` and `check`;
+  - the read commands `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact`
+    and `errors`, windowed and never truncated silently;
+  - the write gate: `apply` (snapshot, rehearse inside a transaction and
+    roll back, preview), `approve` (the developer, at a console),
+    `apply --confirm` (commits only what was approved), `policy`,
+    `journal list | show | restore` and `history`.
 
-The write gate arrives in Phase 2. The plan, and how each idea maps to each
+What each gate stops, and what it does not, is in
+[SECURITY.md](SECURITY.md). The plan, and how each idea maps to each
 database, is in [DESIGN.md](DESIGN.md).
 
 [pythia](https://github.com/thaildhe172591/pythia) for Oracle is a separate,
@@ -39,10 +44,13 @@ class PostgresEngine:
     env_prefix, version, bind_style = "PYTHIA_PG", "0.1.0.dev0", "pyformat"
     # ...the connect tier: driver_errors, connect, session, close,
     # connect_failure, schema_of, target_of, server_version, current_schema
-    # ...and the read tier: object_names, source, columns, ddl, grep,
+    # ...the read tier: object_names, source, columns, ddl, grep,
     # dependencies, dependents, compile_errors
+    # ...and the write tier: classify, prepare_statement, parse_object,
+    # destructive_reason, dml_probe, measure_row_set, snapshot, rehearse,
+    # restore_statement, privilege_warning
 
-assert engine_problems(PostgresEngine(), ("connect", "read")) == []   # in your suite
+assert engine_problems(PostgresEngine(), ("connect", "read", "write")) == []
 
 def main(argv=None):
     return cli.main(PostgresEngine(), argv)          # your console script
@@ -58,6 +66,7 @@ can use both safely.
 python tests/test_core.py
 python tests/test_cli.py
 python tests/test_read.py
+python tests/test_gate.py
 ```
 
 CI runs them on Ubuntu, Windows and macOS, Python 3.9 and 3.13.

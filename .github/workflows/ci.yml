@@ -23,6 +23,7 @@ jobs:
       - run: python tests/test_core.py
       - run: python tests/test_cli.py
       - run: python tests/test_read.py
+      - run: python tests/test_gate.py
 
   package:
     runs-on: ubuntu-latest

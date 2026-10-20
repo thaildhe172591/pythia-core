@@ -1,7 +1,7 @@
 # The pythia family — design
 
-Status: **Phase 1** (October 2026). This document is the plan; the code in
-this repository is its first two steps. Where the two disagree, the code is what
+Status: **Phase 2** (October 2026). This document is the plan; the code in
+this repository is its first three steps. Where the two disagree, the code is what
 runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
@@ -81,8 +81,10 @@ engine.** Everything else is core.
 | lint framework (severities, conventions file) | lint rules |
 | skill lint, routing-table checks | the skills' content |
 
-Phases 0 and 1 brought the first two rows of core, the query lint, and the
-read commands with their output windowing. §7 says when the rest moves.
+Phases 0–2 brought connections, the output contract, the query lint, the
+policy, tokens and grants (with the console door only), the journal and the
+six steps. The chat doors, deploy batching, leases, the harness and the lint
+framework are Phase 3 (§7).
 
 ## 4. The engine contract
 
@@ -111,16 +113,46 @@ marks any truncation. It counts what `impact` found, and says when the list
 must go to the developer before code is written: 10 or more dependents, or
 one in another schema (pythia's rule 2).
 
-**Write tier** (Phase 2, draft): statement reading — `classify`,
-`prepare_statement`, `parse_object`, `name_conflicts`, `reconcile_statement`,
-`create_prefix`, `destructive_reason`, `dml_probe`, `lint`; catalog questions
-around the write — `occupants`, `object_source` (the snapshot),
-`privilege_warning`, `measure_row_set`, `invalid_objects`, `before_write`;
-verifying reuses the read tier's `compile_errors`. This list comes from
-pythia's own `run_apply`: each method is one place where that function asks
-Oracle something. Phase 2 settles it against PostgreSQL, which is the second
-implementation, and two implementations are the least that can show what
-the abstraction really is.
+**Write tier** (settled in Phase 2, for engines whose DDL runs in a
+transaction): `classify`, `prepare_statement`, `parse_object`,
+`destructive_reason`, `dml_probe`, `measure_row_set`, `snapshot`,
+`rehearse`, `restore_statement`, `privilege_warning`. The Phase 1 draft
+took its list from pythia's `run_apply`, which asks Oracle a question at
+every step because Oracle cannot take a write back. PostgreSQL showed that
+most of those questions collapse into one: **rehearse** the statement inside
+a transaction and report what happened. That covers which overload it
+replaced, what it looks like after, how many rows it touched, and what
+`plpgsql_check` says broke compared with just before. Then roll back.
+`name_conflicts`, `reconcile_statement`, `create_prefix`, `occupants`,
+`invalid_objects` and `before_write` are gone. `lint` moves to Phase 3 with
+the lint framework. MongoDB cannot rehearse (§5); it will need a second
+write path, and Phase 5 designs it against this one.
+
+Core owns the transaction and the six steps (`gate.py`):
+
+1. **Snapshot** — everything the statement could replace, written to the
+   journal before anything runs.
+2. **Impact** — the read tier's `dependents`, with its blind spots.
+3. **Rehearse** — run, verify, roll back. A statement that fails here has
+   nothing to approve.
+4. **Preview** — the diff between the definition before and after (both as
+   the database prints them, so formatting is no noise), the rehearsal, the
+   rows, the warnings, and a token over the file, the object as it stood
+   and the row set.
+5. **Commit** — only on `--confirm <token>` with a person's grant, or
+   `--yes` at a real console. The confirm run is a second rehearsal, and it
+   commits only if it still matches what was approved: the same token (so
+   the same object state and the same rows), the same row count, and
+   nothing broken that the approved preview did not show. Otherwise it rolls
+   back and says what moved.
+6. **Report** — exit 0 clean, exit 3 written but broken (a breakage the
+   person saw and approved still lands, and is still reported), with the
+   restore command. A restore is a write like any other: previewed,
+   approved, confirmed.
+
+The policy groups are `source`, `comments`, `data_dml`, `structural`,
+`grants` and `session`, with pythia's defaults. `allow` is accepted only for
+`session`: a write that needs no approval is a write no person saw.
 
 Three rules hold for every tier:
 
@@ -140,10 +172,12 @@ Three rules hold for every tier:
    and point at a read-only account instead (§5).
 
 `pythia_core.engine.engine_problems(engine, tiers)` is the conformance
-check. Every engine package asserts it in its own suite. From Phase 2,
-pythia-core also ships the adversarial write-gate scenarios (pythia's
-`test_phase3`/`test_phase6` ported to a fake connection), and every engine
-runs them against its own engine.
+check. Every engine package asserts it in its own suite. The gate's
+invariants are proven twice. pythia-core's `tests/test_gate.py` drives the
+gate through a fake engine with a real transaction, and each test tries to
+get one write past one invariant. Each engine then proves its own write tier
+end to end against a real server: pythia-postgres's `tests/live_check.py`
+does this for PostgreSQL.
 
 ## 5. Each concept, per database
 
@@ -166,25 +200,37 @@ runs them against its own engine.
 
 ### What PostgreSQL makes stronger than Oracle
 
-DDL runs inside a transaction. The PostgreSQL write gate can therefore offer
-a **verified preview**: run the statement, ask the verify questions
-(dependent views still compile, `plpgsql_check` clean, row count as
-approved), then `ROLLBACK`. The person approves a result that was observed,
-not one that was predicted. On confirm, the same statement runs again and
-commits only if the verification matches the preview. Statements that refuse
-a transaction block get no such preview, and the preview says so.
+DDL runs inside a transaction, so the write gate offers a **verified
+preview**: run the statement, verify it, `ROLLBACK`. The person approves a
+result that was observed, not one that was predicted. An `ALTER TABLE ...
+DROP COLUMN` shows the PL/pgSQL function it would break before anything
+commits. Oracle's pythia can only report that breakage after the fact. A
+rehearsal is bounded (`statement_timeout` 30 s, `lock_timeout` 5 s) so a
+preview never rewrites a big table or waits on a lock for long. Statements
+that refuse a transaction block (`CREATE INDEX CONCURRENTLY`, `VACUUM`, ...)
+are refused outright: with no rehearsal and no rollback, nothing about them
+could be shown honestly.
 
 ### What PostgreSQL makes weaker, and the gate must cover
 
 - **Overloads.** `CREATE OR REPLACE FUNCTION f(int)` when `f(text)` exists
-  creates a second function and leaves the first one live. The gate reads
-  the signature, lists the existing overloads, and asks.
+  creates a second function and leaves the first one live. The rehearsal
+  sees which object was created and which replaced, and the preview says
+  plainly that the old overload stays callable.
 - **Late binding.** No `INVALID` status exists to compare before and after.
   Without `plpgsql_check`, "nothing broke" cannot be shown, and the report
   says "not verified", never "clean".
 - **`search_path`.** An unqualified name resolves by `search_path`, not by
-  the configured schema. `check` already reports a mismatch. Phase 2 makes
-  it a refusal, as pythia's `refuse_schema_mismatch` does.
+  the configured schema. `check` reports a mismatch, and `apply` refuses
+  one, as pythia's `refuse_schema_mismatch` does. `ddl` is rebuilt with
+  only `pg_catalog` on the path, as pg_dump does, so its names come out
+  qualified and it runs the same from any session (found by the DDL round
+  trip, not by reasoning).
+- **A rehearsal is not free.** It runs triggers, takes locks for its
+  duration, and advances any sequence it draws from (`nextval` is not rolled
+  back). The preview of a DML statement says so, and SECURITY.md lists it.
+  The row-set probe also runs the statement's own predicate before approval,
+  as pythia's does.
 - **Checking depends on who checks.** Phase 1 found two ways `errors` could
   report errors that are not there. `plpgsql_check` resolves names by the
   checking session's `search_path`, so the engine puts the configured schema
@@ -212,9 +258,9 @@ against a real database (a disposable container, never a shared one).
 | Phase | Core | Engine | Done when |
 |---|---|---|---|
 | 0 · done | engine contract, tiers, conformance check, per-engine config, query lint, `version` / `connections` / `check` | pythia-postgres: identity, connect tier, two queries, `pythia-pg check` | both repositories' suites green; `pythia-pg check` against a real PostgreSQL |
-| **1 · read (now)** | output windowing and truncation, read commands, impact summary and the rule-2 review line | PostgreSQL read tier: `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact` (blind spots named), `errors` via `plpgsql_check` when present; CI job against `postgres` in a service container | an agent can do pythia's Learn phase on PostgreSQL: every read command passes against a fixture on a real server, `ddl` rebuilds what it describes, `errors` is checked with and without `plpgsql_check` |
-| 2 · write | policy, tokens, grants, approval doors, journal, the six steps, restore, adversarial test kit | PostgreSQL write tier, verified preview, overload and `search_path` refusals | the ported adversarial suite passes for PostgreSQL |
-| 3 · harness | hooks, install, MCP approver, doctor framework, leases, deploy | `psql` guard, `pythia-pg-*` skills, doctor checks | an agent in Claude Code and Codex is held to the gate the way pythia's is |
+| 1 · read · done | output windowing and truncation, read commands, impact summary and the rule-2 review line | PostgreSQL read tier: `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact` (blind spots named), `errors` via `plpgsql_check` when present; CI job against `postgres` in a service container | an agent can do pythia's Learn phase on PostgreSQL: every read command passes against a fixture on a real server, `ddl` rebuilds what it describes, `errors` is checked with and without `plpgsql_check` |
+| **2 · write (now)** | policy, tokens, grants, the console approval door, journal, the six steps, restore, the adversarial suite (`test_gate.py`) | PostgreSQL write tier: a dollar-quote-aware reader, the verified preview, overloads named, `search_path` refused, rows revalidated by ctid | every gate invariant is attacked in `test_gate.py`, and `live_check.py` runs preview → approve → confirm → restore on a real server: rows that moved and a verification that moved are rolled back, and a DROP COLUMN shows the function it would break |
+| 3 · harness | hooks, install, the chat approval doors (AskUserQuestion card + hook, MCP approver), doctor framework, lint framework, leases, deploy (scripts, one approval per release) | `psql` guard, `pythia-pg-*` skills, doctor checks, lint rules | an agent in Claude Code and Codex is held to the gate the way pythia's is |
 | 4 · SQL Server | — | pythia-mssql: all tiers, `GO` splitting, `sp_refreshsqlmodule` verify | as Phase 1–3, for SQL Server |
 | 5 · MongoDB | groups that fit documents (validator, index, view, data) | pythia-mongo: command-document classification, validator verify by counting rejected documents | as Phase 1–3, for MongoDB |
 

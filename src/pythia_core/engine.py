@@ -40,10 +40,9 @@ CONNECT = (
     "current_schema",   # (conn) -> where an unqualified name lands, or None
 )
 
-# READ is settled (Phase 1); WRITE is a draft that Phase 2 settles
-# (DESIGN.md). Both are listed so a command can be refused by tier, and so an
-# engine author sees the whole road. Names are passed as the person typed
-# them: folding them is the engine's business.
+# READ was settled in Phase 1 and WRITE in Phase 2 (DESIGN.md). A command is
+# refused by tier, so an engine author can ship one tier at a time. Names are
+# passed as the person typed them: folding them is the engine's business.
 READ = (
     "object_names",     # (conn, schema, pattern, fetch) -> (cols, rows);
                         #    pattern is LIKE-style, at most `fetch` rows
@@ -66,13 +65,31 @@ READ = (
 )
 
 WRITE = (
-    # reading the statement: pure, testable without a database
-    "classify", "prepare_statement", "parse_object", "name_conflicts",
-    "reconcile_statement", "create_prefix", "destructive_reason", "dml_probe",
-    "lint",
-    # asking the catalog around the write
-    "occupants", "object_source", "privilege_warning", "measure_row_set",
-    "invalid_objects", "before_write",
+    # Settled in Phase 2, for engines whose DDL runs in a transaction
+    # (PostgreSQL, SQL Server). Core owns the transaction: it rolls back after
+    # a preview and commits only on an approved --confirm (gate.py).
+    "classify",         # (text) -> (group, None) or (None, why it is refused);
+                        #    groups: pythia_core.policy.GROUPS
+    "prepare_statement",  # (text, group) -> the statement to run
+    "parse_object",     # (stmt, group) -> {type, name, schema or None} for
+                        #    source and comments, else None
+    "destructive_reason",  # (stmt, group) -> why no journal brings it back,
+                        #    or None
+    "dml_probe",        # (stmt) -> (target, predicate) of the rows an UPDATE
+                        #    or DELETE touches, None for INSERT; refuses what
+                        #    it cannot read
+    "measure_row_set",  # (conn, target, predicate) -> {target, predicate,
+                        #    count, hash, columns, sample, truncated}
+    "snapshot",         # (conn, schema, group, ident) -> {label: definition}
+                        #    of everything the statement could replace
+    "rehearse",         # (conn, schema, group, stmt, ident, snapshot) -> run
+                        #    it inside the open transaction and verify:
+                        #    {error, object, type, after, rows, broken,
+                        #    own_errors, verified, blind, notes}
+    "restore_statement",  # (group, ident, before, outcome) -> the statement
+                        #    that puts it back (a DROP for a new object)
+    "privilege_warning",  # (conn, schema) -> one line when the account can
+                        #    do far more than the task needs, else None
 )
 
 TIERS = {"connect": CONNECT, "read": READ, "write": WRITE}
