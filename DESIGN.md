@@ -1,8 +1,8 @@
 # The pythia family — design
 
-Status: **Phase 4c** (October 2026). This document is the plan; the code in
-this repository is its first nine steps — Phase 3 is complete — and
-pythia-mssql reads and writes on it. Where the two disagree, the code is what
+Status: **Phase 4 is complete** (October 2026); Phase 5 is next. This
+document is the plan; the code in this repository is its first nine steps,
+and pythia-postgres and pythia-mssql each run on all of it. Where the two disagree, the code is what
 runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
@@ -322,7 +322,7 @@ does this for PostgreSQL.
 | Plan without running | `EXPLAIN PLAN` + `DBMS_XPLAN` | `EXPLAIN` without `ANALYZE` (`ANALYZE` executes: refused) | `SET SHOWPLAN_XML ON` | `explain("queryPlanner")` (`executionStats` executes: refused) |
 | Script splitting | `;` and `/`, q-quotes, SQL*Plus directives refused | `;`, dollar quotes `$tag$`, `E''` strings; psql meta-commands (`\i`, `\gexec`) refused | `GO` separator (a client construct, not T-SQL); `CREATE PROCEDURE` must open its batch | one command document per file (Extended JSON). JavaScript is refused, as pythia refuses anonymous PL/SQL blocks |
 | Comments on objects | `COMMENT ON` | `COMMENT ON` (`obj_description`, `col_description`) | extended property `MS_Description` | none: a `$jsonSchema` `description` |
-| Raw clients the guard denies | `sqlplus`, `sql`, SQLcl MCP `run-sql` | `psql` (and `pg_restore` into a database) | `sqlcmd`, `Invoke-Sqlcmd`, `osql`, `bcp` in | `mongosh`, `mongo`, `mongoimport`, `mongorestore` |
+| Raw clients the guard denies | `sqlplus`, `sql`, SQLcl MCP `run-sql` | `psql` (and `pg_restore` into a database) | `sqlcmd`, `osql`, `isql`, `mssql-cli`, `Invoke-Sqlcmd`; `bcp ... in`; `sqlpackage` Publish and Import. A procedure first in a batch needs no `EXEC`, so any `sp_`/`xp_` name counts as a write | `mongosh`, `mongo`, `mongoimport`, `mongorestore` |
 | Identifier case | unquoted folds to upper | unquoted folds to lower | per collation (usually case-insensitive) | case-sensitive |
 | "Schema" | user / schema | schema (inside a database); the default is `public` | schema (`dbo` by default) | database |
 
@@ -395,7 +395,7 @@ against a real database (a disposable container, never a shared one).
 | 3e · lint · done | lint tier and framework (rules, severities, naming patterns in lint.json, the conventions file), lint in every preview and card, autopilot never lands a lint error; `test_lint.py` | PostgreSQL rules: SECURITY DEFINER without `search_path`, `SELECT *` in stored code, `timestamp` without time zone, `char(n)`, `money`, `serial`, `NOT IN (subquery)`, a table without a comment in the change (a RAISE argument mismatch is left to the rehearsal: PostgreSQL rejects it itself) | lint errors are shown in every preview and never landed unasked |
 | 4a · SQL Server reads · done | — | pythia-mssql: the driver spike (§8), connect and read tiers, `errors` through `sys.dm_sql_referenced_entities`, tables rebuilt by `ddl`; CI against SQL Server 2022 in a service container | every read command passes against a fixture on a real server as a least-privilege login, and `ddl` rebuilds what it describes |
 | 4b · SQL Server writes · done | `escaped`: a rehearsal whose transaction ended inside the statement is never called unwritten — exit 3, the approval spent, a lease paused; previews name only the doors an engine has | the write tier: a T-SQL reader (`N''`, `[ ]`, nested comments, `GO`), classification, the rehearsal verified by binding modules before and after and run one transaction level down (a trigger's `COMMIT` commits nothing), rows revalidated by `CHECKSUM_AGG` | as Phase 2, for SQL Server — and a trigger that commits past the rehearsal is reported as written, on a real server |
-| **4c · SQL Server harness (now)** | — | harness, release (`GO` batches) and lint tiers, the `pythia-mssql-*` skills | as Phase 3, for SQL Server |
+| 4c · SQL Server harness · done | — | harness (`sqlcmd`, `osql`, `Invoke-Sqlcmd`, `bcp in`, `sqlpackage` Publish), release (`GO` batches, a module's body to the end of its batch) and lint tiers (ten T-SQL rules), the `pythia-mssql-*` skills | as Phase 3, for SQL Server: `install` field-tested, and a release, a lint error and a lease write on a real server |
 | 5 · MongoDB | groups that fit documents (validator, index, view, data) | pythia-mongo: command-document classification, validator verify by counting rejected documents | as Phase 1–3, for MongoDB |
 
 Not planned: moving pythia for Oracle onto pythia-core. That would be the

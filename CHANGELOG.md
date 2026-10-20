@@ -26,7 +26,8 @@ core.
 - `queries.py` says how an engine whose driver never turns `%%` into `%`
   keeps the one query contract.
 - DESIGN.md §5 says where SQL Server lets a trigger end the caller's
-  transaction, and the roadmap marks 4a and 4b done.
+  transaction, and which SQL Server clients the guard denies; the roadmap
+  marks Phase 4 done.
 
 ## 0.8.0.dev0 — unreleased
 
