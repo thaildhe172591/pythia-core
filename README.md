@@ -4,11 +4,17 @@ The part of pythia that is the same for every database. Engine packages
 build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres)
 first, then SQL Server and MongoDB.
 
-**Pre-alpha (Phase 0).** What is here today: the engine contract and its
-conformance check, per-engine connection resolution, the query-contract lint,
-and the `version` / `connections` / `check` commands that every engine's
-command line inherits. The write gate arrives in Phase 2. The plan, and how
-each idea maps to each database, is in [DESIGN.md](DESIGN.md).
+**Pre-alpha (Phase 1).** What is here today:
+- the engine contract and its conformance check;
+- per-engine connection resolution;
+- the query-contract lint;
+- the commands every engine's command line inherits: `version`,
+  `connections`, `check`, and the read commands `ls`, `src`, `cols`, `ddl`,
+  `grep`, `deps`, `impact` and `errors`, windowed and never truncated
+  silently.
+
+The write gate arrives in Phase 2. The plan, and how each idea maps to each
+database, is in [DESIGN.md](DESIGN.md).
 
 [pythia](https://github.com/thaildhe172591/pythia) for Oracle is a separate,
 self-contained tool. It does not use this package and is not changed by it.
@@ -33,8 +39,10 @@ class PostgresEngine:
     env_prefix, version, bind_style = "PYTHIA_PG", "0.1.0.dev0", "pyformat"
     # ...the connect tier: driver_errors, connect, session, close,
     # connect_failure, schema_of, target_of, server_version, current_schema
+    # ...and the read tier: object_names, source, columns, ddl, grep,
+    # dependencies, dependents, compile_errors
 
-assert engine_problems(PostgresEngine()) == []      # in your test suite
+assert engine_problems(PostgresEngine(), ("connect", "read")) == []   # in your suite
 
 def main(argv=None):
     return cli.main(PostgresEngine(), argv)          # your console script
@@ -49,6 +57,7 @@ can use both safely.
 ```bash
 python tests/test_core.py
 python tests/test_cli.py
+python tests/test_read.py
 ```
 
 CI runs them on Ubuntu, Windows and macOS, Python 3.9 and 3.13.

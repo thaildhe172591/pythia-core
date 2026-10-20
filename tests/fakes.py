@@ -89,3 +89,49 @@ class FakeEngine:
 
     def current_schema(self, conn):
         return self._current
+
+
+class FakeReadEngine(FakeEngine):
+    """FakeEngine plus the read tier, answering from canned data."""
+
+    SOURCE = [("FUNCTION f_total(integer)", i, f"line {i}\n") for i in range(1, 6)]
+
+    def __init__(self, dependents=None, notes=None, errors=None, error_note=None,
+                 **kw):
+        super().__init__(**kw)
+        self._dependents = dependents
+        self._notes = list(notes or [])
+        self._errors = list(errors or [])
+        self._error_note = error_note
+
+    def object_names(self, conn, schema, pattern, fetch):
+        rows = [(f"t_{i:02d}", "TABLE", "") for i in range(5)]
+        return ("NAME", "TYPE", "DETAIL"), rows[:fetch]
+
+    def source(self, conn, schema, name):
+        return list(self.SOURCE) if name == "f_total" else []
+
+    def columns(self, conn, schema, name):
+        if name != "t_order":
+            return None
+        return ("COLUMN", "TYPE"), [("id", "integer"), ("total", "numeric")]
+
+    def ddl(self, conn, schema, name):
+        return "\n".join(f"-- ddl line {i}" for i in range(1, 8)) if name == "t_order" else ""
+
+    def grep(self, conn, schema, text, fetch):
+        rows = [("f_total", "FUNCTION", 3, "select total from t_order")]
+        return ("NAME", "TYPE", "LINE", "TEXT"), rows[:fetch]
+
+    def dependencies(self, conn, schema, name, depth):
+        if name != "f_total":
+            return None
+        return [(1, schema, "t_order", "TABLE", "text")], list(self._notes)
+
+    def dependents(self, conn, schema, name, depth):
+        if self._dependents is None:
+            return None
+        return list(self._dependents), list(self._notes)
+
+    def compile_errors(self, conn, schema, name):
+        return list(self._errors), self._error_note

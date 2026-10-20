@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, "claude/**"]
   pull_request:
 
 jobs:
@@ -22,6 +22,7 @@ jobs:
       - run: python -m compileall -q src tests
       - run: python tests/test_core.py
       - run: python tests/test_cli.py
+      - run: python tests/test_read.py
 
   package:
     runs-on: ubuntu-latest

@@ -6,7 +6,8 @@ packages depend on it; pythia for Oracle does not.
 ## Before calling a change done
 
 - Run every suite, no database needed: `python tests/test_core.py`,
-  `python tests/test_cli.py`. TDD: the failing test comes first.
+  `python tests/test_cli.py`, `python tests/test_read.py`. TDD: the failing
+  test comes first.
 - CI runs Ubuntu, Windows and macOS on Python 3.9 and 3.13. Build paths with
   `pathlib` / `os.path.join`, derive the interpreter from `sys.executable`,
   and use no stdlib API newer than 3.9.
@@ -21,6 +22,8 @@ packages depend on it; pythia for Oracle does not.
   into DESIGN.md §4, in the same change.
 - **Never touch the Oracle tool's state.** An engine's files live under
   `.pythia/<engine>/`, and its environment variables under its own prefix.
+- **Truncation is always announced.** A list is windowed with `clip`; what
+  it leaves out is said, with how to get it.
 - **Docs never contradict code.** A behaviour change updates the docstring,
   README.md, DESIGN.md and CHANGELOG.md in the same change.
 - **Versions** agree in pyproject.toml and `pythia_core.__version__`.

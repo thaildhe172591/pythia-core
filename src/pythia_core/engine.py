@@ -40,15 +40,29 @@ CONNECT = (
     "current_schema",   # (conn) -> where an unqualified name lands, or None
 )
 
-# Phase 1 settles READ, Phase 2 WRITE (DESIGN.md). They are listed now so a
-# command can be refused by tier from the first release, and so an engine
-# author sees the whole road.
+# READ is settled (Phase 1); WRITE is a draft that Phase 2 settles
+# (DESIGN.md). Both are listed so a command can be refused by tier, and so an
+# engine author sees the whole road. Names are passed as the person typed
+# them: folding them is the engine's business.
 READ = (
-    "object_names",     # (conn, schema) -> rows: name, type, status, last change
-    "object_source",    # (conn, schema, name, type) -> text, '' when none
-    "columns",          # (conn, schema, name) -> rows
-    "dependents",       # (conn, schema, name, depth) -> rows: level, schema,
-                        #    name, type — plus what the graph cannot see
+    "object_names",     # (conn, schema, pattern, fetch) -> (cols, rows);
+                        #    pattern is LIKE-style, at most `fetch` rows
+    "source",           # (conn, schema, name) -> rows (unit, line, text);
+                        #    [] when there is none
+    "columns",          # (conn, schema, name) -> (cols, rows), None if no such
+                        #    table or view
+    "ddl",              # (conn, schema, name) -> text, '' if none
+    "grep",             # (conn, schema, text, fetch) -> (cols, rows): each
+                        #    source line holding text, at most `fetch` rows
+    "dependencies",     # (conn, schema, name, depth) -> (rows, blind_spots)
+    "dependents",       # (conn, schema, name, depth) -> (rows, blind_spots);
+                        #    rows (level, schema, name, type, how) in walk
+                        #    order, how "text" when only a name match vouches
+                        #    for it; None when no object has the name
+    "compile_errors",   # (conn, schema, name or None) -> (rows, blind_spot);
+                        #    rows (name, type, line, position, severity,
+                        #    message); blind_spot None only when the check
+                        #    covered everything
 )
 
 WRITE = (
@@ -57,8 +71,8 @@ WRITE = (
     "reconcile_statement", "create_prefix", "destructive_reason", "dml_probe",
     "lint",
     # asking the catalog around the write
-    "occupants", "privilege_warning", "measure_row_set", "invalid_objects",
-    "before_write", "compile_errors",
+    "occupants", "object_source", "privilege_warning", "measure_row_set",
+    "invalid_objects", "before_write",
 )
 
 TIERS = {"connect": CONNECT, "read": READ, "write": WRITE}

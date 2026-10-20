@@ -1,7 +1,7 @@
 # The pythia family — design
 
-Status: **Phase 0** (October 2026). This document is the plan; the code in
-this repository is its first step. Where the two disagree, the code is what
+Status: **Phase 1** (October 2026). This document is the plan; the code in
+this repository is its first two steps. Where the two disagree, the code is what
 runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
@@ -81,8 +81,8 @@ engine.** Everything else is core.
 | lint framework (severities, conventions file) | lint rules |
 | skill lint, routing-table checks | the skills' content |
 
-Phase 0 has the first two rows of core (and the query lint). §7 says when the
-rest moves.
+Phases 0 and 1 brought the first two rows of core, the query lint, and the
+read commands with their output windowing. §7 says when the rest moves.
 
 ## 4. The engine contract
 
@@ -98,14 +98,25 @@ list; this section explains it.
 `connect_failure`, `schema_of`, `target_of`, `server_version`,
 `current_schema`.
 
-**Read tier** (Phase 1): `object_names`, `object_source`, `columns`,
-`dependents`.
+**Read tier** (settled in Phase 1): `object_names`, `source`, `columns`,
+`ddl`, `grep`, `dependencies`, `dependents`, `compile_errors`. Names arrive as
+the person typed them; folding them is the engine's business. `dependencies`
+and `dependents` return rows `(level, schema, name, type, how)` in walk order
+plus a list of blind spots; `how` is `text` when only a name match in source
+vouches for a row. `compile_errors` returns its rows and one blind spot,
+which is `None` only when the check covered everything. Core turns these
+into the commands `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact` and
+`errors`. It windows every list (`--limit`, `--max-lines`, `--offset`) and
+marks any truncation. It counts what `impact` found, and says when the list
+must go to the developer before code is written: 10 or more dependents, or
+one in another schema (pythia's rule 2).
 
 **Write tier** (Phase 2, draft): statement reading — `classify`,
 `prepare_statement`, `parse_object`, `name_conflicts`, `reconcile_statement`,
 `create_prefix`, `destructive_reason`, `dml_probe`, `lint`; catalog questions
-around the write — `occupants`, `privilege_warning`, `measure_row_set`,
-`invalid_objects`, `before_write`, `compile_errors`. This list comes from
+around the write — `occupants`, `object_source` (the snapshot),
+`privilege_warning`, `measure_row_set`, `invalid_objects`, `before_write`;
+verifying reuses the read tier's `compile_errors`. This list comes from
 pythia's own `run_apply`: each method is one place where that function asks
 Oracle something. Phase 2 settles it against PostgreSQL, which is the second
 implementation, and two implementations are the least that can show what
@@ -174,6 +185,13 @@ a transaction block get no such preview, and the preview says so.
 - **`search_path`.** An unqualified name resolves by `search_path`, not by
   the configured schema. `check` already reports a mismatch. Phase 2 makes
   it a refusal, as pythia's `refuse_schema_mismatch` does.
+- **Checking depends on who checks.** Phase 1 found two ways `errors` could
+  report errors that are not there. `plpgsql_check` resolves names by the
+  checking session's `search_path`, so the engine puts the configured schema
+  first for that transaction. And an account without `USAGE` on the schema
+  has it left off the path silently, so every name looks missing. Then the
+  engine reports nothing and says why. A false list of errors is a guess
+  presented as a finding.
 
 ## 6. The standing rules, per engine
 
@@ -193,8 +211,8 @@ against a real database (a disposable container, never a shared one).
 
 | Phase | Core | Engine | Done when |
 |---|---|---|---|
-| **0 (now)** | engine contract, tiers, conformance check, per-engine config, query lint, `version` / `connections` / `check` | pythia-postgres: identity, connect tier, two queries, `pythia-pg check` | both repositories' suites green; `pythia-pg check` against a real PostgreSQL |
-| 1 · read | output windowing and truncation, read-command scaffolding | PostgreSQL read tier: `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact` (blind spots named), `errors` via `plpgsql_check` when present; CI job against `postgres` in a service container | an agent can do pythia's Learn phase on PostgreSQL |
+| 0 · done | engine contract, tiers, conformance check, per-engine config, query lint, `version` / `connections` / `check` | pythia-postgres: identity, connect tier, two queries, `pythia-pg check` | both repositories' suites green; `pythia-pg check` against a real PostgreSQL |
+| **1 · read (now)** | output windowing and truncation, read commands, impact summary and the rule-2 review line | PostgreSQL read tier: `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact` (blind spots named), `errors` via `plpgsql_check` when present; CI job against `postgres` in a service container | an agent can do pythia's Learn phase on PostgreSQL: every read command passes against a fixture on a real server, `ddl` rebuilds what it describes, `errors` is checked with and without `plpgsql_check` |
 | 2 · write | policy, tokens, grants, approval doors, journal, the six steps, restore, adversarial test kit | PostgreSQL write tier, verified preview, overload and `search_path` refusals | the ported adversarial suite passes for PostgreSQL |
 | 3 · harness | hooks, install, MCP approver, doctor framework, leases, deploy | `psql` guard, `pythia-pg-*` skills, doctor checks | an agent in Claude Code and Codex is held to the gate the way pythia's is |
 | 4 · SQL Server | — | pythia-mssql: all tiers, `GO` splitting, `sp_refreshsqlmodule` verify | as Phase 1–3, for SQL Server |
