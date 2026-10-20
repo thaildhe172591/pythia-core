@@ -96,10 +96,12 @@ WRITE = (
 HARNESS = (
     # Settled in Phase 3: what the hooks and `install` need (harness.py).
     "raw_client_pattern",   # () -> regex naming the engine's own clients
-                            #    (psql), matched where a command starts
-    "write_sql_pattern",    # () -> regex of statements that write
+                            #    (psql), matched as any word of a command
+    "write_sql_pattern",    # () -> regex of statements that write, matched
+                            #    against the whole command, quotes included
     "script_pattern",       # () -> regex of a client reading a script or a
-                            #    dump (-f file, < file): always a write path
+                            #    dump (-f file, < file): always a write
+                            #    path; matched with quoted text emptied
     "connections_template",  # () -> the connections.json install scaffolds
     "skills_dir",           # () -> the folder holding the engine's skills
 )

@@ -5,8 +5,11 @@
 Phase 3a of the plan in DESIGN.md: the harness.
 
 - **`hook pre-tool`, the PreToolUse guard.** It denies the ways around the
-  gate it knows: the engine's raw client given write SQL or a script (also
-  behind `env`, `sudo`, a pipe or `bash -c`), an MCP SQL tool given write
+  gate it knows: the engine's raw client given write SQL or a script (named
+  anywhere in the command, so also behind `env`, `sudo`, `docker exec`,
+  `ssh`, a pipe or `bash -c`; flags and redirections are read with quoted
+  SQL emptied, so a `<` in a WHERE clause is not a script), an MCP SQL
+  tool given write
   SQL, a grant written by hand, the console seam or `grants.mint` from a
   one-liner, the agent setting `<PREFIX>_CI`, reading `connections.json`,
   and editing the policy or the journal by hand. It allows without a prompt

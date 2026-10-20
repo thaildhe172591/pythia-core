@@ -466,7 +466,7 @@ def cmd_doctor(engine, ns):
         print(json.dumps({"ok": not bad, "checks": rows}))
         return 1 if bad else 0
     for r in rows:
-        print(f"  {r['status']:<4} {r['what']:<16} {r['detail']}")
+        print(f"  {r['status']:<4} {r['what']:<18} {r['detail']}")
     if bad:
         print(f"\n  {bad} problem(s) to fix first — each fail line names its fix.")
     return 1 if bad else 0

@@ -165,7 +165,8 @@ The policy groups are `source`, `comments`, `data_dml`, `structural`,
 (`harness.py`, `install.py`, `skills.py`):
 
 - `hook pre-tool`, the PreToolUse guard. It **denies** the engine's raw
-  client given write SQL or a script, an MCP SQL tool given write SQL, a
+  client (named anywhere in the command) given write SQL or a script (its
+  flags read with quoted SQL emptied), an MCP SQL tool given write SQL, a
   grant written by hand or minted from a one-liner, the agent setting
   `<PREFIX>_CI`, reading `connections.json`, and editing the policy or the
   journal by hand. It **allows** without a prompt one plain command of the

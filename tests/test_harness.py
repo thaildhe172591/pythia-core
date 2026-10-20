@@ -72,6 +72,8 @@ def test_raw_client_writes_are_denied_and_reads_are_left_alone():
         assert verdict(bash(root, "fakesql -f release.sql")) == "deny"
         assert verdict(bash(root, "fakesql app < release.sql")) == "deny"
         assert bash(root, "fakesql -c 'select 1'") is None
+        assert bash(root, "fakesql -c 'select 1 where 2 < 3'") is None   # SQL, not a redirect
+        assert bash(root, "fakesql -c \"select '-f'\"") is None
         assert bash(root, "grep -r 'drop table' docs/") is None   # not a client
 
 
@@ -151,6 +153,9 @@ def test_a_client_behind_a_wrapper_is_still_the_client():
     with project() as root:
         for cmd in ("bash -c 'fakesql -c \"drop table t\"'",
                     "sudo fakesql -f x.sql", "env A=1 fakesql -f x.sql",
+                    "PGX=1 fakesql -f x.sql", "A=1 B='x y' fakesql -f x.sql",
+                    "cd /tmp; X=1 fakesql -f x.sql",
+                    "docker exec db fakesql -f x.sql", "ssh dbhost fakesql -f x.sql",
                     "echo 'delete from t' | fakesql",
                     "fakesql <<EOF\ndrop table t;\nEOF",
                     "FAKESQL.EXE -c 'drop table t'"):
@@ -341,6 +346,30 @@ def test_install_wires_everything_and_leaves_what_is_not_its_own():
         acted = [ln for ln in printed.splitlines()
                  if ln.split(" ", 1)[0] in ("created", "updated", "added")]
         assert not acted, acted
+
+
+def test_install_keeps_every_hook_and_setting_that_is_not_its_own():
+    with project(config=False) as root:
+        local = root / ".claude" / "settings.local.json"
+        local.parent.mkdir()
+        oracle = {"type": "command", "command": "python -m pythia hook pre-tool"}
+        local.write_text(json.dumps({
+            "model": "kept",
+            "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [oracle]}],
+                      "Stop": [{"hooks": [{"type": "command", "command": "notify"}]}]},
+            "permissions": {"deny": ["Read(./secrets/**)"], "allow": ["Bash(ls:*)"]}}),
+            encoding="utf-8")
+        install(root)
+        s = json.loads(local.read_text(encoding="utf-8"))
+        assert s["model"] == "kept" and s["permissions"]["allow"] == ["Bash(ls:*)"]
+        assert s["permissions"]["deny"][0] == "Read(./secrets/**)"
+        assert s["hooks"]["PreToolUse"][0] == {"matcher": "Bash", "hooks": [oracle]}
+        assert s["hooks"]["Stop"][0]["hooks"][0]["command"] == "notify"
+        assert sum("hook pre-tool" in json.dumps(e) for e in s["hooks"]["PreToolUse"]) == 3
+        broken = root / ".claude" / "settings.local.json"
+        broken.write_text("{ not json", encoding="utf-8")
+        code, printed = install(root)
+        assert "SKIPPED" in printed and broken.read_text(encoding="utf-8") == "{ not json"
 
 
 def test_doctor_says_what_is_wired_and_what_is_not():

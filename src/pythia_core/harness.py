@@ -250,22 +250,37 @@ FORGE_RE = re.compile(r"FORCE_CONSOLE|_real_console|console_session|"
                       r"\bimport\s+mint\b", re.I)
 
 
+QUOTED_RE = re.compile(r"'[^']*'" r'|"(?:[^"\\]|\\.)*"')
+
+
+def unquoted(command):
+    """The shell command with every quoted string emptied: what the shell
+    itself reads as flags and redirections, not the SQL handed to a client."""
+    return QUOTED_RE.sub(lambda m: m.group(0)[0] * 2, command or "")
+
+
 def client_invoked(pattern, command):
-    """The engine's raw client is run somewhere in this shell command: at
-    its start, after an operator, behind a wrapper (env, sudo, xargs), or
-    opening a quoted command (`bash -c '...'`). A quoted mention in a grep
-    is denied too — the cost of a pattern that cannot read intent."""
+    """The engine's raw client is named as a word anywhere in this shell
+    command: at its start, after an operator, behind a wrapper (`env`,
+    `sudo`, `docker exec db`, `ssh host`), after variable assignments, or
+    opening a quoted command (`bash -c '...'`). Any word, because a shell
+    has more ways to start a program than a pattern can list; a mention in
+    an echo or a grep costs a denied harmless command, never a missed
+    write."""
     return re.search(
-        r"(?:^|[;&|(\"']\s*|\b(?:then|do|exec|xargs|sudo|env|time|nohup|command)"
-        rf"\s+(?:\S+=\S*\s+)*)(?:\S*[/\\])?(?:{pattern})(?:\.exe)?(?=\s|$|[;&|)])",
-        command or "", re.I | re.M) is not None
+        rf"(?:^|[\s;&|(\"'`=])(?:\S*[/\\])?(?:{pattern})(?:\.exe)?"
+        r"(?=$|[\s;&|)\"'`])", command or "", re.I) is not None
 
 
 def raw_write(engine, command):
+    """The client with write SQL anywhere in the command (it is usually
+    quoted), or reading a script the way the shell hands it one (`-f`,
+    `<`, a pipe) — matched with quoted text emptied, so SQL that holds a
+    `<` is not taken for a redirection."""
     if not client_invoked(engine.raw_client_pattern(), command):
         return False
     return bool(re.search(engine.write_sql_pattern(), command, re.I)
-                or re.search(engine.script_pattern(), command, re.I))
+                or re.search(engine.script_pattern(), unquoted(command), re.I))
 
 
 # --- the decision -------------------------------------------------------------------------
