@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pythia-core"
+version = "0.1.0.dev0"
+description = "Shared core of the pythia family: the engine contract, connection resolution and the write gate every pythia-<engine> package drives."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+# stdlib only, by contract (tests/test_core.py): a driver belongs to the
+# engine package that needs it, so nobody installs one they do not use
+dependencies = []
+keywords = ["database", "agent-skills", "sql", "postgresql", "sql-server", "mongodb"]
+
+[project.urls]
+Repository = "https://github.com/thaildhe172591/pythia-core"
+
+[tool.setuptools.packages.find]
+where = ["src"]

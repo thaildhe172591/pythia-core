@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.9", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      # nothing to install: the core and its suites are stdlib only, by contract
+      - run: python -m compileall -q src tests
+      - run: python tests/test_core.py
+      - run: python tests/test_cli.py
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip wheel . --no-deps -w dist
+      - run: pip install --no-deps dist/*.whl
+      - run: cd /tmp && python -c "import pythia_core, pythia_core.cli; print(pythia_core.__version__)"
