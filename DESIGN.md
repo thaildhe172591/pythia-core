@@ -1,7 +1,7 @@
 # The pythia family — design
 
-Status: **Phase 3d** (October 2026). This document is the plan; the code in
-this repository is its first seven steps. Where the two disagree, the code is what
+Status: **Phase 3e** (October 2026). This document is the plan; the code in
+this repository is its first eight steps: Phase 3 is complete. Where the two disagree, the code is what
 runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
@@ -89,8 +89,8 @@ Phases 0–2 brought connections, the output contract, the query lint, the
 policy, tokens and grants (with the console door only), the journal and the
 six steps. Phase 3a brought the harness: the guard, the session brief,
 install, doctor and the skill lint. Phase 3b brought the chat doors,
-Phase 3c the release (`deploy`) and Phase 3d autopilot leases. The lint
-framework (3e) follows (§7).
+Phase 3c the release (`deploy`), Phase 3d autopilot leases and Phase 3e the
+lint framework (§7).
 
 ## 4. The engine contract
 
@@ -261,6 +261,18 @@ pauses itself: a write that breaks something, or five failures in a row.
 `autopilot report` lists every write under it, with the restores. A lease
 file that is missing, corrupt, unapproved or past its time is no lease.
 
+**Lint tier** (settled in Phase 3e): `lint_rules() -> [rule]`, each rule
+`{id, severity, summary, check(statement, group, run) -> [(line, message)]}`.
+Core (`lint.py`) runs them over a change — `lint <files>` lints the files as
+one run, so a rule sees across them — and adds a `naming` rule from the
+team's patterns. `.pythia/<engine>/lint.json` sets severities (`error`,
+`warn`, `info`, `off`) and naming patterns per object type; an unknown key,
+rule, severity or pattern is refused, as the policy is. Findings appear in
+every apply and deploy preview, a statement's errors on its card, and
+autopilot never lands a lint error. A rule that crashes is reported as a
+warning and never blocks. The brief points at the team's
+`.pythia/<engine>/conventions.md` when it exists.
+
 Three rules hold for every tier:
 
 1. **Refuse by tier, before connecting.** A command whose tier the engine
@@ -370,8 +382,8 @@ against a real database (a disposable container, never a shared one).
 | 3a · harness · done | harness tier; the PreToolUse guard and the session brief, `install`, `doctor`, `skill lint`; the adversarial guard suite (`test_harness.py`) | `psql` guard patterns, the `pythia-pg-*` skills, install field-tested in a scratch project | every way around the gate the guard knows is denied in `test_harness.py`, and a scratch project installed by `pythia-pg install` passes `doctor` |
 | 3b · chat doors · done | the AskUserQuestion card and its answer hook, the MCP approver, local registration, doctor's door checks; the adversarial door suite (`test_doors.py`) | the doors in the skills and AGENTS.md | every way to mint without a person's Approve on the card is refused in `test_doors.py`, and the MCP server answers a real JSON-RPC session |
 | 3c · release · done | release tier, `deploy`: a release rehearsed and committed as one transaction under one approval; the adversarial suite (`test_release.py`) | `split_script` (dollar quotes, line numbers), the `pythia-pg-deploy` skill, a live release that adds a column and fills it | every way to land part of a release that was not approved as a whole is refused in `test_release.py`, and `live_check.py` lands and rolls back a release on a real server |
-| **3d · leases (now)** | autopilot leases: request, card, any door, coverage, pause, report; the adversarial suite (`test_lease.py`) | the `pythia-pg-autopilot` skill, a live write under a lease | every way to land a write a lease does not cover is refused in `test_lease.py` |
-| 3e · lint | lint framework (rules, severities, the conventions file), lint in the preview, autopilot never lands a lint error | lint rules | lint errors are shown in every preview and never landed unasked |
+| 3d · leases · done | autopilot leases: request, card, any door, coverage, pause, report; the adversarial suite (`test_lease.py`) | the `pythia-pg-autopilot` skill, a live write under a lease | every way to land a write a lease does not cover is refused in `test_lease.py` |
+| **3e · lint (now)** | lint tier and framework (rules, severities, naming patterns in lint.json, the conventions file), lint in every preview and card, autopilot never lands a lint error; `test_lint.py` | PostgreSQL rules: SECURITY DEFINER without `search_path`, RAISE placeholders that do not match their arguments, `SELECT *` in stored code, `timestamp` without time zone, `char(n)`, `money`, `serial`, `NOT IN (subquery)`, a table without a comment in the change | lint errors are shown in every preview and never landed unasked |
 | 4 · SQL Server | — | pythia-mssql: all tiers, `GO` splitting, `sp_refreshsqlmodule` verify | as Phase 1–3, for SQL Server |
 | 5 · MongoDB | groups that fit documents (validator, index, view, data) | pythia-mongo: command-document classification, validator verify by counting rejected documents | as Phase 1–3, for MongoDB |
 

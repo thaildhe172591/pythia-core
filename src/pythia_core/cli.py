@@ -36,7 +36,7 @@ COMMAND_TIERS = {"check": ("connect",), "ls": READ_TIERS, "src": READ_TIERS,
                  "apply": WRITE_TIERS, "restore": WRITE_TIERS,
                  "deploy": WRITE_TIERS + ("release",)}
 OFFLINE = ("version", "connections", "approve", "policy", "history", "journal",
-           "hook", "install", "doctor", "skill", "mcp", "autopilot")
+           "hook", "install", "doctor", "skill", "mcp", "autopilot", "lint")
 
 
 def build_parser(engine):
@@ -138,6 +138,12 @@ def build_parser(engine):
     s.add_argument("action", choices=("list", "show", "restore"))
     s.add_argument("id", nargs="?")
     write_flags(s)
+    s = sub.add_parser("lint", parents=[common()],
+                       help="the engine's rules and the team's lint.json over a "
+                            "change's files — run before apply")
+    s.add_argument("paths", nargs="*", metavar="file")
+    s.add_argument("--rules", action="store_true",
+                   help="list every rule and its effective severity")
     s = sub.add_parser("autopilot", parents=[common()],
                        help="a lease: the developer delegates a session once "
                             "instead of approving every write")
@@ -541,6 +547,48 @@ def cmd_skill(engine, ns):
     return 1 if bad else 0
 
 
+def cmd_lint(engine, ns):
+    """A change's files linted as one, so a rule can see across them."""
+    from . import lint
+    refuse_unless(engine, "lint", "lint")
+    cfg = lint.load(engine, ns.state)
+    if ns.rules:
+        rows = lint.effective(engine, cfg)
+        if ns.json:
+            print(json.dumps([{"rule": r, "severity": s, "summary": m}
+                              for r, s, m in rows]))
+            return 0
+        for r, s, m in rows:
+            print(f"  {r:<34} {s:<5}  {m}")
+        return 0
+    if not ns.paths:
+        sys.exit(f"Usage: {engine.command} lint <files> (or --rules)")
+    refuse_unless(engine, "release", "lint")
+    statements = []
+    for name in ns.paths:
+        p = pathlib.Path(name)
+        if not p.is_file():
+            sys.exit(f"No such file: {p}")
+        for line, text in engine.split_script(p.read_text(encoding="utf-8")):
+            group, _ = engine.classify(text)
+            statements.append({"file": name, "line": line, "text": text,
+                               "group": group, "n": len(statements) + 1})
+    findings = lint.run(engine, cfg, statements)
+    bad = lint.errors(findings)
+    if ns.json:
+        print(json.dumps({"findings": findings, "errors": len(bad),
+                          "statements": len(statements)}))
+        return 1 if bad else 0
+    print(f"lint: {len(statements)} statement(s) in {len(ns.paths)} file(s) — "
+          f"{lint.summary(findings)}")
+    for ln in lint.render(findings):
+        print(ln)
+    if bad:
+        print("\nErrors are fixed, not argued — or the developer approves the "
+              "file as it is, seeing them on the card.")
+    return 1 if bad else 0
+
+
 def cmd_autopilot(engine, ns):
     """Requesting and revoking are anyone's; activating is the developer's —
     approving the request's card through a door, or `autopilot on` at a
@@ -641,7 +689,8 @@ def cmd_autopilot(engine, ns):
 OFFLINE_COMMANDS = {"approve": cmd_approve, "policy": cmd_policy,
                     "journal": cmd_journal, "history": cmd_history,
                     "install": cmd_install, "doctor": cmd_doctor,
-                    "skill": cmd_skill, "autopilot": cmd_autopilot}
+                    "skill": cmd_skill, "autopilot": cmd_autopilot,
+                    "lint": cmd_lint}
 
 
 def main(engine, argv=None):

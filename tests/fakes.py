@@ -305,6 +305,36 @@ class FakeHarnessEngine(FakeWriteEngine):
     def script_pattern(self):
         return r"(^|\s)(-f|--file)(\s|=)|\s<\s*\S"
 
+    def lint_rules(self):
+        """Two rules, enough to drive the framework: an error and a warning,
+        each with the line inside the statement it found."""
+        import re
+
+        def star(stmt, group, run):
+            return [(i + 1, "SELECT * freezes the column list")
+                    for i, ln in enumerate(stmt.splitlines())
+                    if re.search(r"select\s+\*", ln, re.I)]
+
+        def definer(stmt, group, run):
+            if re.search(r"security\s+definer", stmt, re.I) and \
+                    not re.search(r"set\s+search_path", stmt, re.I):
+                return [(1, "SECURITY DEFINER without SET search_path")]
+            return []
+
+        def uncommented(stmt, group, run):
+            m = re.match(r"create table (\w+)", stmt, re.I)
+            if m and not any(re.match(rf"comment on table {m.group(1)}\b", s, re.I)
+                             for s in run):
+                return [(1, f"table {m.group(1)} has no COMMENT ON TABLE in this change")]
+            return []
+
+        return [{"id": "fake-select-star", "severity": "warn",
+                 "summary": "SELECT * in stored code", "check": star},
+                {"id": "fake-definer-path", "severity": "error",
+                 "summary": "SECURITY DEFINER needs SET search_path", "check": definer},
+                {"id": "fake-table-comment", "severity": "warn",
+                 "summary": "every table carries a comment", "check": uncommented}]
+
     def connections_template(self):
         return {"default": "dev", "dev": {"host": "", "user": "", "password": "",
                                           "schema": ""}}

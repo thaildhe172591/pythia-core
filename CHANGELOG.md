@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.0.dev0 — unreleased
+
+Phase 3e of the plan in DESIGN.md: the lint framework. Phase 3 is complete.
+
+- **The lint tier:** `lint_rules()`, each rule an id, a default severity, a
+  summary and a check over one statement that can see the whole change.
+- **`lint <files>`** lints a change's files as one run and exits 1 on an
+  error; **`lint --rules`** lists every rule with its effective severity.
+- **`.pythia/<engine>/lint.json`**: severities (`error`, `warn`, `info`,
+  `off`) and naming patterns per object type, refused when it holds an
+  unknown key, rule, severity or a pattern that does not compile.
+- **Lint in the gate:** findings in every apply and deploy preview, errors on
+  the card, and autopilot never lands a lint error. A rule that crashes is a
+  warning, never a block.
+- The brief asks for `lint` before any apply, and names
+  `.pythia/<engine>/conventions.md` when the team keeps one.
+- **`tests/test_lint.py`**, mutation-checked.
+
 ## 0.7.0.dev0 — unreleased
 
 Phase 3d of the plan in DESIGN.md: autopilot leases.

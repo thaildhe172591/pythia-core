@@ -25,7 +25,8 @@ import pathlib
 import re
 import sys
 
-from . import gate, grants, journal, lease, policy
+from . import gate, grants, journal, lease, lint, policy
+from .engine import missing
 from .human import human_at_the_keyboard
 from .output import impact_summary, summary_lines
 
@@ -215,6 +216,7 @@ def batch_card(rec):
                 lines += gate.render_row_set(m["row_set"], indent="      ")
         if m.get("destructive"):
             lines.append(f"      ! DESTRUCTIVE: {m['destructive']}.")
+        lines += [f"      {ln}" for ln in gate.lint_card_lines(m.get("lint") or [])]
     broken = [(m["n"], b) for m in ms for b in
               m["rehearsal"]["own_errors"] + m["rehearsal"]["broken"]]
     blind = [(m["n"], m["rehearsal"]["blind"]) for m in ms
@@ -257,6 +259,8 @@ def run_deploy(engine, conn, ns):
     entry = getattr(ns, "conn_entry", None)
     preflight(engine, state, statements, lambda g: lease.names_group(
         state, ns.conn_name, entry, g))
+    findings = ([] if missing(engine, "lint") else
+                lint.run(engine, lint.load(engine, state), statements))
     if ns.yes and not human_at_the_keyboard(engine):
         sys.exit(gate.headless_yes(engine))
     confirm = str(ns.confirm or "").strip().lower() or None
@@ -267,6 +271,8 @@ def run_deploy(engine, conn, ns):
 
     members, error = run_members(engine, conn, ns, statements, then,
                                  batch=confirm)
+    for m in members:
+        m["lint"] = [f for f in findings if f["n"] == m["n"]]
     if error:
         conn.rollback()
         if writing:
@@ -284,6 +290,8 @@ def run_deploy(engine, conn, ns):
             covered, why = lease.covers(state, ns.conn_name, entry, m["group"],
                                         m["destructive"],
                                         m["row_set"]["count"] if m["row_set"] else None)
+            if covered and lint.errors(m["lint"]):
+                covered, why = False, gate.lint_refusal(m["lint"])
             if not covered:
                 auto_why = why and f"statement {m['n']}: {why}"
                 break
@@ -394,6 +402,7 @@ def _print_preview(engine, ns, rec, auto_why=None):
           f"statements from {len(rec['files'])} file(s).\n")
     for ln in batch_card(rec):
         print(f"  {ln}")
+    gate.print_lint([f for m in rec["members"] for f in m.get("lint") or []])
     for m in rec["members"]:
         if m["group"] != "source":
             continue

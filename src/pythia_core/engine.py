@@ -40,7 +40,7 @@ CONNECT = (
     "current_schema",   # (conn) -> where an unqualified name lands, or None
 )
 
-# READ was settled in Phase 1, WRITE in Phase 2, HARNESS and RELEASE in
+# READ was settled in Phase 1, WRITE in Phase 2, HARNESS, RELEASE and LINT in
 # Phase 3 (DESIGN.md). A command is refused by tier, so an engine author can ship one
 # tier at a time. Names are passed as the person typed them: folding them is
 # the engine's business.
@@ -113,8 +113,14 @@ RELEASE = (
                         #    holds none
 )
 
+LINT = (
+    # Settled in Phase 3e (lint.py): the engine's rules, each
+    #    {id, severity, summary, check(statement, group, run) -> [(line, msg)]}
+    "lint_rules",       # () -> [rule]
+)
+
 TIERS = {"connect": CONNECT, "read": READ, "write": WRITE, "harness": HARNESS,
-         "release": RELEASE}
+         "release": RELEASE, "lint": LINT}
 
 BIND_STYLES = ("named", "pyformat")
 

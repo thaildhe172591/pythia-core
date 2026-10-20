@@ -4,7 +4,7 @@ The part of pythia that is the same for every database. Engine packages
 build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres)
 first, then SQL Server and MongoDB.
 
-**Pre-alpha (Phase 3d).** What is here today:
+**Pre-alpha (Phase 3e).** What is here today:
 - the engine contract and its conformance check;
 - per-engine connection resolution;
 - the query-contract lint;
@@ -23,6 +23,8 @@ first, then SQL Server and MongoDB.
   - `autopilot request | on | off | status | report`: a lease the developer
     approves once, covering only the connection, groups and limits its card
     names;
+  - `lint <files>` (and `lint --rules`): the engine's rules and the team's
+    severities and naming patterns over a change, shown in every preview;
   - the harness: `hook pre-tool` (the guard that denies the ways around the
     gate and waves through what cannot write), `hook session-start` (the
     rules and the project's state), `install` (connections scaffold,
@@ -64,10 +66,12 @@ class PostgresEngine:
     # restore_statement, privilege_warning
     # ...the harness tier: raw_client_pattern, write_sql_pattern,
     # script_pattern, connections_template, skills_dir
-    # ...and the release tier: split_script
+    # ...the release tier: split_script
+    # ...and the lint tier: lint_rules
 
 assert engine_problems(PostgresEngine(),
-                       ("connect", "read", "write", "harness", "release")) == []
+                       ("connect", "read", "write", "harness", "release",
+                        "lint")) == []
 
 def main(argv=None):
     return cli.main(PostgresEngine(), argv)          # your console script
@@ -88,6 +92,7 @@ python tests/test_harness.py
 python tests/test_doors.py
 python tests/test_release.py
 python tests/test_lease.py
+python tests/test_lint.py
 ```
 
 CI runs them on Ubuntu, Windows and macOS, Python 3.9 and 3.13.

@@ -166,7 +166,7 @@ def classify_argv(engine, argv):
 
 
 READ_COMMANDS = ("version", "connections", "check", "ls", "src", "cols", "ddl",
-                 "grep", "deps", "impact", "errors", "history", "doctor")
+                 "grep", "deps", "impact", "errors", "history", "doctor", "lint")
 
 
 # --- what the guard protects -----------------------------------------------------------
@@ -420,6 +420,9 @@ def brief(engine):
 
 LEARN  impact before any change: `{run} impact <name>`. Ask the live
        database, never a dump (`ls`, `src`, `cols`, `ddl`, `grep`).
+       `{run} lint <files>` before any apply - a change's files in one run;
+       errors are fixed, not argued. Read the team's conventions.md if the
+       STATE line names it.
        `{run} connections` - never open {config_rel(engine)}.
 ASK    relay every `{run} apply` preview verbatim and wait for a real yes.
        >=10 dependents or another schema: show the developer first.
@@ -459,6 +462,10 @@ def state_lines(engine, root):
         lines.append(f"connections: {names or 'none filled in'} (* = default; "
                      f"`{run} connections` for details)")
     lines.append(lease.line(lease.read(state_dir(root, engine))))
+    conv = state_dir(root, engine) / "conventions.md"
+    if conv.is_file():
+        lines.append(f"conventions: {STATE_DIR}/{engine.name}/conventions.md "
+                     "exists — read it before writing any object")
     try:
         eff = policy.load(state_dir(root, engine))
         lines.append("policy: " + ", ".join(f"{g} {v}" for g, (v, _) in eff.items()))

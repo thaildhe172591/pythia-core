@@ -20,7 +20,8 @@ import hashlib
 import json
 import sys
 
-from . import grants, journal, lease, policy
+from . import grants, journal, lease, lint, policy
+from .engine import missing
 from .human import ci_variable, console_session, human_at_the_keyboard
 from .output import impact_summary, summary_lines
 
@@ -160,6 +161,7 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
     if ns.yes and not human_at_the_keyboard(engine):
         sys.exit(headless_yes(engine))
     stmt = engine.prepare_statement(text, group)
+    findings = lint_one(engine, state, ns.file, text, group)
 
     if group == "session":
         out = engine.rehearse(conn, schema, group, stmt, None, {})
@@ -209,7 +211,7 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
     name = ident["name"] if ident else "STATEMENT"
     meta = {"schema": schema, "connection": ns.conn_name, "group": group,
             "applied": False, "row_set": row_set, "then": then,
-            **(origin or {})}
+            "lint": findings, **(origin or {})}
     eid = journal.write_entry(state, otype, name, "\n\n".join(snap.values()),
                               text, meta)
     auto_why = None
@@ -217,6 +219,8 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
         covered, auto_why = lease.covers(
             state, ns.conn_name, entry, group, engine.destructive_reason(stmt, group),
             row_set["count"] if row_set else None)
+        if covered and lint.errors(findings):
+            covered, auto_why = False, lint_refusal(findings)
         if covered:
             via, writing = "autopilot", True
             journal.update_entry(state, eid, autopilot=lease.read(state).get("token"))
@@ -302,13 +306,14 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
                           "impact_blind_spots": blind_impact,
                           "rehearsal": rehearsal, "row_set": row_set,
                           "destructive": hurt, "warning": warn, "token": token,
-                          "journal": eid, "will_apply": False,
+                          "journal": eid, "will_apply": False, "lint": findings,
                           "autopilot": {"covered": False, "why": auto_why}},
                          default=str))
     elif not ns.json:
         _print_preview(group, obj, otype, schema, created, changed, summary,
                        blind_impact, rehearsal, row_set, hurt, warn, diff_text,
                        entry_path)
+        print_lint(findings)
     if not writing:
         if not ns.json:
             print()
@@ -369,6 +374,40 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
                   "deny, so it will be refused.\n  The developer decides: "
                   f"{cmd} policy set structural confirm")
     return 0 if ok else 3
+
+
+def lint_one(engine, state, name, text, group):
+    """The lint findings for one statement file; [] for an engine with no
+    rules. A team's lint.json that cannot be read is refused here, before
+    anything runs."""
+    if group == "session" or missing(engine, "lint"):
+        return []
+    line = 1
+    if not missing(engine, "release"):
+        parts = engine.split_script(text)
+        line = parts[0][0] if parts else 1
+    return lint.run(engine, lint.load(engine, state),
+                    [{"file": name, "line": line, "text": text, "group": group}])
+
+
+def lint_refusal(findings):
+    return (f"{len(lint.errors(findings))} lint error(s) — autopilot does not land "
+            "them; fix the file, or the developer approves it as it is")
+
+
+def lint_card_lines(findings, prefix=""):
+    bad = lint.errors(findings)
+    if not bad:
+        return []
+    return [f"! {prefix}{len(bad)} lint error{'s' if len(bad) != 1 else ''}: "
+            + "; ".join(f"{f['rule']} (line {f['line']}): {f['message']}" for f in bad)]
+
+
+def print_lint(findings):
+    if findings:
+        print(f"\n  lint: {lint.summary(findings)}")
+        for ln in lint.render(findings, indent="    "):
+            print(ln)
 
 
 def _print_preview(group, obj, otype, schema, created, changed, summary,
@@ -469,6 +508,7 @@ def approval_card(engine, state, token):
         lines.append(f"Rehearsed: ran and rolled back, NOT VERIFIED — {reh.get('blind')}")
     if meta.get("destructive"):
         lines.append(f"! DESTRUCTIVE: {meta['destructive']}.")
+    lines += lint_card_lines(meta.get("lint") or [])
     if group not in policy.UNDOABLE:
         lines.append("There is no snapshot for this group — after commit it "
                      "cannot be undone from the journal.")
