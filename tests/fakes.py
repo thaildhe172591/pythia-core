@@ -282,7 +282,19 @@ class FakeWriteEngine(FakeReadEngine):
 
 
 class FakeHarnessEngine(FakeWriteEngine):
-    """FakeWriteEngine plus the harness tier."""
+    """FakeWriteEngine plus the harness and release tiers."""
+
+    def split_script(self, text):
+        """(line, statement) for each ';'-ended statement; the fake's
+        statements hold no ';' of their own."""
+        out, line = [], 1
+        for part in text.split(";"):
+            body = part.strip()
+            if body:
+                lead = part[:len(part) - len(part.lstrip())]
+                out.append((line + lead.count("\n"), body))
+            line += part.count("\n")
+        return out
 
     def raw_client_pattern(self):
         return r"fakesql"

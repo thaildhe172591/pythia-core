@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0.dev0 — unreleased
+
+Phase 3c of the plan in DESIGN.md: the release.
+
+- **`deploy <files>`:** a release — scripts holding many statements —
+  through the gate as one transaction. Every statement is rehearsed in
+  order inside it, snapshotted to the journal before it runs, its rows
+  measured and its verification taken at its own point, then everything
+  rolls back. One card lists them all; one approval (a 10-digit token,
+  through any door) covers them.
+- **The confirm is all or nothing.** The grant, the files and every
+  statement's bytes are checked before anything runs; the release then runs
+  again in one transaction and commits only if every member still matches
+  what was approved — token, row count, verification. Anything else, or a
+  failure at any statement, rolls the whole release back and leaves the
+  approval unspent.
+- **Refused before anything runs:** a statement the engine cannot classify,
+  a session setting inside a release, a denied group.
+- **The release tier:** `split_script`.
+- A member's own token is refused at every door: a release is approved as a
+  whole.
+- The guard lets a deploy preview through, and a confirm with a valid grant.
+- **`tests/test_release.py`**, adversarial and mutation-checked.
+
 ## 0.5.0.dev0 — unreleased
 
 Phase 3b of the plan in DESIGN.md: approval from chat.

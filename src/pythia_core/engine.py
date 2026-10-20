@@ -40,8 +40,8 @@ CONNECT = (
     "current_schema",   # (conn) -> where an unqualified name lands, or None
 )
 
-# READ was settled in Phase 1, WRITE in Phase 2 and HARNESS in Phase 3
-# (DESIGN.md). A command is refused by tier, so an engine author can ship one
+# READ was settled in Phase 1, WRITE in Phase 2, HARNESS and RELEASE in
+# Phase 3 (DESIGN.md). A command is refused by tier, so an engine author can ship one
 # tier at a time. Names are passed as the person typed them: folding them is
 # the engine's business.
 READ = (
@@ -106,7 +106,15 @@ HARNESS = (
     "skills_dir",           # () -> the folder holding the engine's skills
 )
 
-TIERS = {"connect": CONNECT, "read": READ, "write": WRITE, "harness": HARNESS}
+RELEASE = (
+    # Settled in Phase 3c: what deploy needs beyond the write tier.
+    "split_script",     # (text) -> [(line, statement)] in order, each as
+                        #    classify would read it; [] for a script that
+                        #    holds none
+)
+
+TIERS = {"connect": CONNECT, "read": READ, "write": WRITE, "harness": HARNESS,
+         "release": RELEASE}
 
 BIND_STYLES = ("named", "pyformat")
 

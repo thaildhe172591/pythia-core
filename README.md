@@ -4,7 +4,7 @@ The part of pythia that is the same for every database. Engine packages
 build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres)
 first, then SQL Server and MongoDB.
 
-**Pre-alpha (Phase 3b).** What is here today:
+**Pre-alpha (Phase 3c).** What is here today:
 - the engine contract and its conformance check;
 - per-engine connection resolution;
 - the query-contract lint;
@@ -18,6 +18,8 @@ first, then SQL Server and MongoDB.
     `mcp`),
     `apply --confirm` (commits only what was approved), `policy`,
     `journal list | show | restore` and `history`;
+  - `deploy <files>`: a release rehearsed and committed as one transaction,
+    under one approval — all of it lands, or none of it;
   - the harness: `hook pre-tool` (the guard that denies the ways around the
     gate and waves through what cannot write), `hook session-start` (the
     rules and the project's state), `install` (connections scaffold,
@@ -57,11 +59,12 @@ class PostgresEngine:
     # ...and the write tier: classify, prepare_statement, parse_object,
     # destructive_reason, dml_probe, measure_row_set, snapshot, rehearse,
     # restore_statement, privilege_warning
-    # ...and the harness tier: raw_client_pattern, write_sql_pattern,
+    # ...the harness tier: raw_client_pattern, write_sql_pattern,
     # script_pattern, connections_template, skills_dir
+    # ...and the release tier: split_script
 
 assert engine_problems(PostgresEngine(),
-                       ("connect", "read", "write", "harness")) == []
+                       ("connect", "read", "write", "harness", "release")) == []
 
 def main(argv=None):
     return cli.main(PostgresEngine(), argv)          # your console script
@@ -80,6 +83,7 @@ python tests/test_read.py
 python tests/test_gate.py
 python tests/test_harness.py
 python tests/test_doors.py
+python tests/test_release.py
 ```
 
 CI runs them on Ubuntu, Windows and macOS, Python 3.9 and 3.13.

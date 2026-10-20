@@ -156,7 +156,7 @@ def classify_argv(engine, argv):
         if ns.action in ("list", "show"):
             return "read", ns
         return ("write" if ns.confirm else "preview"), ns
-    if sub == "apply":
+    if sub in ("apply", "deploy"):
         return ("write" if ns.confirm else "preview"), ns
     return "other", ns
 
@@ -406,8 +406,8 @@ ASK    relay every `{run} apply` preview verbatim and wait for a real yes.
        >=10 dependents or another schema: show the developer first.
        Refusals and exit 3 (written-but-broken) are relayed, never routed
        around. Never read exit codes through a pipe.
-DO     writes only via `{run} apply <file>` (one statement), never the raw
-       client. Approval doors - the first that works, the next unasked if
+DO     writes only via `{run} apply <file>` (one statement) or `{run}
+       deploy <files>` (a release, one transaction), never the raw client. Approval doors - the first that works, the next unasked if
        one fails: AskUserQuestion, its text exactly the output of
        `{run} approve --card <token>`, options Approve / Reject (Claude
        Code); the `{tool}` tool (MCP; Codex starts here);

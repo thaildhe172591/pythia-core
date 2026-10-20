@@ -16,7 +16,8 @@ import os
 import pathlib
 import sys
 
-from . import __version__, doors, gate, harness, install, journal, policy, skills
+from . import (__version__, doors, gate, harness, install, journal, policy,
+               release, skills)
 from .config import (config_rel, connection_summary, find_config,
                      resolve_connection, state_dir)
 from .engine import refuse_unless
@@ -32,7 +33,8 @@ WRITE_TIERS = ("connect", "read", "write")
 COMMAND_TIERS = {"check": ("connect",), "ls": READ_TIERS, "src": READ_TIERS,
                  "cols": READ_TIERS, "ddl": READ_TIERS, "grep": READ_TIERS,
                  "deps": READ_TIERS, "impact": READ_TIERS, "errors": READ_TIERS,
-                 "apply": WRITE_TIERS, "restore": WRITE_TIERS}
+                 "apply": WRITE_TIERS, "restore": WRITE_TIERS,
+                 "deploy": WRITE_TIERS + ("release",)}
 OFFLINE = ("version", "connections", "approve", "policy", "history", "journal",
            "hook", "install", "doctor", "skill", "mcp")
 
@@ -108,6 +110,12 @@ def build_parser(engine):
                        help="preview one statement (rehearsed, rolled back); "
                             "with --confirm, write it")
     s.add_argument("file")
+    write_flags(s)
+    s = sub.add_parser("deploy", parents=[common()],
+                       help="preview a release (scripts, many statements) "
+                            "rehearsed as one transaction; with --confirm, "
+                            "write all of it or none")
+    s.add_argument("paths", nargs="+", metavar="file")
     write_flags(s)
     s = sub.add_parser("approve", parents=[common()],
                        help="the developer approves a previewed token (a real "
@@ -342,10 +350,14 @@ def cmd_restore(engine, conn, ns):
                           then=f"{engine.command} journal restore {ns.id}")
 
 
+def cmd_deploy(engine, conn, ns):
+    return release.run_deploy(engine, conn, ns)
+
+
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "cols": cmd_cols,
             "ddl": cmd_ddl, "grep": cmd_grep, "deps": cmd_deps,
             "impact": cmd_impact, "errors": cmd_errors, "apply": cmd_apply,
-            "restore": cmd_restore}
+            "restore": cmd_restore, "deploy": cmd_deploy}
 
 
 # --- offline: the developer's half and the record ------------------------------------
@@ -567,7 +579,7 @@ def main(engine, argv=None):
         handle = engine.connect(entry)
         # reads run in a session the database itself keeps read-only; the
         # write path's defences are the gate's, not a transaction attribute
-        conn = engine.session(handle, key not in ("apply", "restore"))
+        conn = engine.session(handle, key not in ("apply", "restore", "deploy"))
     except errors + (OSError,) as e:
         # OSError too: a DNS or socket failure can arrive raw from the socket
         # layer instead of wrapped as the driver's own error

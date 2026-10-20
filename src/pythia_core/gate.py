@@ -400,7 +400,11 @@ def _print_preview(group, obj, otype, schema, created, changed, summary,
 
 def approval_card(engine, state, token):
     """What a person approves, read from the preview's journal entry and never
-    recomputed: the object, the rehearsal, the rows, the warnings."""
+    recomputed: the object, the rehearsal, the rows, the warnings. A 10-digit
+    token names a release (release.py), approved on its own card."""
+    if len(str(token)) == 10:
+        from . import release
+        return release.approval_card(engine, state, token)
     entry, meta = journal.find_by_token(state, token)
     if not meta:
         sys.exit(f"No pending preview carries token {token!r}.\nApprove what "
@@ -410,6 +414,10 @@ def approval_card(engine, state, token):
         sys.exit(f"Token {token!r} belongs to a preview that was already "
                  f"applied.\nPreview again for a fresh token:\n  "
                  f"{engine.command} apply <file>")
+    if meta.get("batch"):
+        sys.exit(f"Token {token!r} is one statement of release "
+                 f"{meta['batch']}: a release is approved as a whole, on its "
+                 f"own card:\n  {engine.command} approve --card {meta['batch']}")
     group = meta.get("group", "")
     reh = meta.get("rehearsal") or {}
     lines = []
@@ -460,8 +468,8 @@ def grant_approval(engine, state, token, meta, approver, session=None):
 def approve(engine, state, token, card_only=False, as_json=False):
     token = str(token or "").strip().lower()
     if not grants.valid_token(token):
-        sys.exit(f"Not a pythia token: {token!r} — tokens are the 6 hex digits "
-                 "a preview prints.")
+        sys.exit(f"Not a pythia token: {token!r} — tokens are the hex digits "
+                 "a preview prints (6 for apply, 10 for deploy).")
     if not card_only and not console_session():
         sys.exit(approve_headless(engine))
     entry, meta, lines = approval_card(engine, state, token)
