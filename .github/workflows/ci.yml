@@ -24,6 +24,7 @@ jobs:
       - run: python tests/test_cli.py
       - run: python tests/test_read.py
       - run: python tests/test_gate.py
+      - run: python tests/test_harness.py
 
   package:
     runs-on: ubuntu-latest

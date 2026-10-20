@@ -16,7 +16,7 @@ import os
 import pathlib
 import sys
 
-from . import __version__, gate, journal, policy
+from . import __version__, gate, harness, install, journal, policy, skills
 from .config import (config_rel, connection_summary, find_config,
                      resolve_connection, state_dir)
 from .engine import refuse_unless
@@ -33,7 +33,8 @@ COMMAND_TIERS = {"check": ("connect",), "ls": READ_TIERS, "src": READ_TIERS,
                  "cols": READ_TIERS, "ddl": READ_TIERS, "grep": READ_TIERS,
                  "deps": READ_TIERS, "impact": READ_TIERS, "errors": READ_TIERS,
                  "apply": WRITE_TIERS, "restore": WRITE_TIERS}
-OFFLINE = ("version", "connections", "approve", "policy", "history", "journal")
+OFFLINE = ("version", "connections", "approve", "policy", "history", "journal",
+           "hook", "install", "doctor", "skill")
 
 
 def build_parser(engine):
@@ -128,6 +129,19 @@ def build_parser(engine):
     s = sub.add_parser("history", parents=[common()],
                        help="every version of one object the journal holds")
     s.add_argument("name")
+    s = sub.add_parser("install", parents=[common()],
+                       help="wire this project: connections scaffold, hooks, "
+                            "instructions, skills")
+    sub.add_parser("doctor", parents=[common()],
+                   help="is the harness wired, and what will break it")
+    s = sub.add_parser("skill", parents=[common()],
+                       help="hold SKILL.md files to the skill contract")
+    s.add_argument("action", choices=("lint",))
+    s.add_argument("paths", nargs="*",
+                   help="skill folders or files (default: the project's)")
+    s = sub.add_parser("hook", help="entry point for the agent client's hooks "
+                                    "(reads its payload on stdin)")
+    s.add_argument("event", choices=("pre-tool", "session-start"))
     return p
 
 
@@ -437,8 +451,56 @@ def cmd_history(engine, ns):
     return 0
 
 
+def cmd_install(engine, ns):
+    refuse_unless(engine, "harness", "install")
+    for line in install.install(engine, ns.root):
+        print(line)
+    return 0
+
+
+def cmd_doctor(engine, ns):
+    refuse_unless(engine, "harness", "doctor")
+    rows = install.doctor(engine, ns.root)
+    bad = sum(1 for r in rows if r["status"] == "fail")
+    if ns.json:
+        print(json.dumps({"ok": not bad, "checks": rows}))
+        return 1 if bad else 0
+    for r in rows:
+        print(f"  {r['status']:<4} {r['what']:<16} {r['detail']}")
+    if bad:
+        print(f"\n  {bad} problem(s) to fix first — each fail line names its fix.")
+    return 1 if bad else 0
+
+
+def cmd_skill(engine, ns):
+    targets = [pathlib.Path(p) for p in ns.paths] or [
+        ns.root / home for home in install.SKILL_HOMES]
+    files = []
+    for t in targets:
+        if t.is_file():
+            files.append(t)
+        elif (t / "SKILL.md").is_file():
+            files.append(t / "SKILL.md")
+        elif t.is_dir():
+            files.extend(sorted(t.glob("*/SKILL.md")))
+    if not files:
+        sys.exit("No SKILL.md found. Pass a skill folder or file.")
+    report = {str(f): skills.lint(f) for f in files}
+    bad = sum(1 for probs in report.values() if probs)
+    if ns.json:
+        print(json.dumps(report))
+        return 1 if bad else 0
+    for f, probs in report.items():
+        print(f"{'ok  ' if not probs else 'FAIL'} {f}")
+        for prob in probs:
+            print(f"     - {prob}")
+    return 1 if bad else 0
+
+
 OFFLINE_COMMANDS = {"approve": cmd_approve, "policy": cmd_policy,
-                    "journal": cmd_journal, "history": cmd_history}
+                    "journal": cmd_journal, "history": cmd_history,
+                    "install": cmd_install, "doctor": cmd_doctor,
+                    "skill": cmd_skill}
 
 
 def main(engine, argv=None):
@@ -451,9 +513,14 @@ def main(engine, argv=None):
     ns = build_parser(engine).parse_args(argv)
     if ns.command == "version":
         return cmd_version(engine, ns)
+    if ns.command == "hook":
+        # before any config is read: a hook fails silent, never with an exit
+        sys.stdout.write(harness.run_hook(engine, ns.event))
+        return 0
     cwd = pathlib.Path.cwd()
     cfg, root = find_config(cwd, os.environ, engine)
-    ns.state = state_dir(root if root is not None else cwd, engine)
+    ns.root = pathlib.Path(root) if root is not None else cwd
+    ns.state = state_dir(ns.root, engine)
     if ns.command == "connections":
         return cmd_connections(engine, ns, cfg)
     key = ns.command

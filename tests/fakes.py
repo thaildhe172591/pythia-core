@@ -279,3 +279,23 @@ class FakeWriteEngine(FakeReadEngine):
 
     def privilege_warning(self, conn, schema):
         return None
+
+
+class FakeHarnessEngine(FakeWriteEngine):
+    """FakeWriteEngine plus the harness tier."""
+
+    def raw_client_pattern(self):
+        return r"fakesql"
+
+    def write_sql_pattern(self):
+        return r"\b(create|drop|alter|insert|update|delete|grant|revoke)\b"
+
+    def script_pattern(self):
+        return r"(^|\s)(-f|--file)(\s|=)|\s<\s*\S"
+
+    def connections_template(self):
+        return {"default": "dev", "dev": {"host": "", "user": "", "password": "",
+                                          "schema": ""}}
+
+    def skills_dir(self):
+        return ROOT / "tests" / "fixtures" / "skills"

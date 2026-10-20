@@ -17,16 +17,24 @@ sets out to forge.
 | Approval grant | an agent completing a write no person approved: single use, 15 minutes, bound to the connection | writing the grant file by hand, or faking a console — deliberate forgery, the `policy.json` tier |
 | Console requirement | a headless agent self-approving with `approve` or `--yes`, or loosening the policy | `<PREFIX>_CI=1` for `--yes` and policy, deliberately, in a real pipeline; `approve` has no such escape |
 | Read-only session | a read command that writes: the database itself refuses | dblink and foreign data wrappers |
+| PreToolUse guard (`hook pre-tool`) | an agent that follows its rules into a known way around the gate: the raw client given write SQL or a script (also behind `env`, `sudo`, a pipe or `bash -c`), an MCP SQL tool given write SQL, a grant written by hand, `grants.mint` or the console seam from a one-liner, the agent setting `<PREFIX>_CI`, reading `connections.json`, editing `policy.json` or the journal | a shell spelling no pattern lists (a variable, an alias, a script file that runs the client); the guard is a hook in the agent's client, and an agent with no hook wired has no guard — `doctor` says so |
+| Deny rules (`install`) | Claude Code's own tools reading `connections.json` or editing the engine's folder, even with no hook running | the shell, which the rules do not cover |
 
 ## Honest limits
 
-- **Phase 2 has no guard on raw clients.** pythia's PreToolUse hook denies
-  writes through `sqlplus` and SQLcl; the family's guard for `psql`,
-  `sqlcmd` and `mongosh` arrives with the harness in Phase 3. Until then,
-  rule 5 of each engine's AGENTS.md ("never write through `psql` on
-  pythia's behalf") is a rule, not a gate.
-- **Approval is console-only in Phase 2.** The chat doors (a dialog card and
-  an MCP approver) arrive in Phase 3. An agent cannot approve from chat
+- **The guard raises the bar; it is not a wall.** It reads a shell command
+  for what it names, never for what it means, so it denies some harmless
+  commands (a `grep` for `psql -f` in quotes) and cannot see a write spelled
+  in a way it does not list. Behind it, the gate's own checks — the token,
+  the grant, the re-rehearsal — hold whatever the hook decided. Writing a
+  grant through a spelling the guard misses is still deliberate forgery,
+  the `policy.json` tier.
+- **The guard reads what the agent's client hands it.** It runs where
+  `install` wired it (Claude Code). An agent whose client runs no hooks is
+  held by the instruction block install writes into AGENTS.md and by the
+  gate's own checks, not by the guard.
+- **Approval is console-only in Phase 3a.** The chat doors (a dialog card and
+  an MCP approver) arrive in Phase 3b. An agent cannot approve from chat
   today, and must ask the developer to run `approve` in a terminal.
 - **The probe runs before approval.** An UPDATE or DELETE is approved on its
   row set, so its own table and predicate are queried before anyone

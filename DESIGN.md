@@ -1,7 +1,7 @@
 # The pythia family — design
 
-Status: **Phase 2** (October 2026). This document is the plan; the code in
-this repository is its first three steps. Where the two disagree, the code is what
+Status: **Phase 3a** (October 2026). This document is the plan; the code in
+this repository is its first four steps. Where the two disagree, the code is what
 runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
@@ -53,16 +53,20 @@ family adds must not collide with one pythia already uses:
   (`PYTHIA_PG_CONNECTION`, ...), so a variable set for one tool never picks
   a connection in another. pythia's `PYTHIA_USER/PASSWORD/DSN` shortcut is
   not carried over yet: credential fields differ per engine.
-- **Skills per engine** (Phase 3). Skill names are global in an agent, and pythia
+- **Skills per engine.** Skill names are global in an agent, and pythia
   ships `pythia-apply`, `using-pythia` and the rest. A family engine's skills
   are prefixed: `pythia-pg-apply`, `using-pythia-pg`.
-- **Hooks per engine** (Phase 3). pythia's PreToolUse guard denies raw writes through
+- **Hooks per engine.** pythia's PreToolUse guard denies raw writes through
   `sqlplus`/`sql`/SQLcl MCP. Each engine adds a guard for its own clients
-  (`psql`, `sqlcmd`, `mongosh`). Guards only deny, so two of them in one
-  agent compose safely.
-- **Gitignore per engine** (Phase 3). pythia's install ignores `.pythia/connections.json`
+  (`psql`, `sqlcmd`, `mongosh`), spelled `<command> hook pre-tool`. A guard
+  denies, allows or stays out; Claude Code lets any deny win, so two in one
+  agent compose safely: neither can wave through what the other denies.
+- **Instructions per engine.** Each engine's install writes its own marked
+  block into CLAUDE.md and AGENTS.md (`<!-- pythia-pg:begin ... -->`); pythia's
+  `<!-- pythia:begin ... -->` block is a different marker and is left alone.
+- **Gitignore per engine.** pythia's install ignores `.pythia/connections.json`
   only. That line does not cover `.pythia/postgres/connections.json`, so each
-  engine's install writes its own ignore line, and its doctor checks it.
+  engine's install writes its own ignore lines, and its doctor checks them.
 
 ## 3. Core and engine: where the line is
 
@@ -83,8 +87,9 @@ engine.** Everything else is core.
 
 Phases 0–2 brought connections, the output contract, the query lint, the
 policy, tokens and grants (with the console door only), the journal and the
-six steps. The chat doors, deploy batching, leases, the harness and the lint
-framework are Phase 3 (§7).
+six steps. Phase 3a brought the harness: the guard, the session brief,
+install, doctor and the skill lint. The chat doors (3b), deploy batching,
+leases and the lint framework (3c) follow (§7).
 
 ## 4. The engine contract
 
@@ -153,6 +158,34 @@ Core owns the transaction and the six steps (`gate.py`):
 The policy groups are `source`, `comments`, `data_dml`, `structural`,
 `grants` and `session`, with pythia's defaults. `allow` is accepted only for
 `session`: a write that needs no approval is a write no person saw.
+
+**Harness tier** (settled in Phase 3a): `raw_client_pattern`,
+`write_sql_pattern`, `script_pattern`, `connections_template`,
+`skills_dir`. Core turns them into four commands that touch no database
+(`harness.py`, `install.py`, `skills.py`):
+
+- `hook pre-tool`, the PreToolUse guard. It **denies** the engine's raw
+  client given write SQL or a script, an MCP SQL tool given write SQL, a
+  grant written by hand or minted from a one-liner, the agent setting
+  `<PREFIX>_CI`, reading `connections.json`, and editing the policy or the
+  journal by hand. It **allows** without a prompt one plain command of the
+  engine that cannot write (a read, a preview, `approve --card`) and a
+  confirm whose grant is valid on that connection. It **stays out** of
+  everything else, so the client's own prompt decides: `approve`, `--yes`,
+  `policy set`, and anything a shell could turn into two commands. Commands
+  are classified by the CLI's own parser, so the guard and the command can
+  never read one argv two ways. It fails silent: a crash is no decision.
+- `hook session-start`, the brief: the rules in Learn/Ask/Do form, how this
+  machine spells the command, and the project's state (connections,
+  policy).
+- `install` scaffolds `connections.json` (mode 600, never rewritten), the
+  `.gitignore` lines, the hooks and deny rules in
+  `.claude/settings.local.json` (spelled with this interpreter's absolute
+  path, so a hook never fails to start for want of PATH), the marked
+  instruction block in CLAUDE.md and AGENTS.md, and the engine's skills in
+  `.claude/skills` and `.agents/skills`. A second run changes nothing.
+- `doctor` checks each of those and exits 1 on a fail; `skill lint` holds
+  SKILL.md files to pythia's skill contract.
 
 Three rules hold for every tier:
 
@@ -259,8 +292,10 @@ against a real database (a disposable container, never a shared one).
 |---|---|---|---|
 | 0 · done | engine contract, tiers, conformance check, per-engine config, query lint, `version` / `connections` / `check` | pythia-postgres: identity, connect tier, two queries, `pythia-pg check` | both repositories' suites green; `pythia-pg check` against a real PostgreSQL |
 | 1 · read · done | output windowing and truncation, read commands, impact summary and the rule-2 review line | PostgreSQL read tier: `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact` (blind spots named), `errors` via `plpgsql_check` when present; CI job against `postgres` in a service container | an agent can do pythia's Learn phase on PostgreSQL: every read command passes against a fixture on a real server, `ddl` rebuilds what it describes, `errors` is checked with and without `plpgsql_check` |
-| **2 · write (now)** | policy, tokens, grants, the console approval door, journal, the six steps, restore, the adversarial suite (`test_gate.py`) | PostgreSQL write tier: a dollar-quote-aware reader, the verified preview, overloads named, `search_path` refused, rows revalidated by ctid | every gate invariant is attacked in `test_gate.py`, and `live_check.py` runs preview → approve → confirm → restore on a real server: rows that moved and a verification that moved are rolled back, and a DROP COLUMN shows the function it would break |
-| 3 · harness | hooks, install, the chat approval doors (AskUserQuestion card + hook, MCP approver), doctor framework, lint framework, leases, deploy (scripts, one approval per release) | `psql` guard, `pythia-pg-*` skills, doctor checks, lint rules | an agent in Claude Code and Codex is held to the gate the way pythia's is |
+| 2 · write · done | policy, tokens, grants, the console approval door, journal, the six steps, restore, the adversarial suite (`test_gate.py`) | PostgreSQL write tier: a dollar-quote-aware reader, the verified preview, overloads named, `search_path` refused, rows revalidated by ctid | every gate invariant is attacked in `test_gate.py`, and `live_check.py` runs preview → approve → confirm → restore on a real server: rows that moved and a verification that moved are rolled back, and a DROP COLUMN shows the function it would break |
+| **3a · harness (now)** | harness tier; the PreToolUse guard and the session brief, `install`, `doctor`, `skill lint`; the adversarial guard suite (`test_harness.py`) | `psql` guard patterns, the `pythia-pg-*` skills, install field-tested in a scratch project | every way around the gate the guard knows is denied in `test_harness.py`, and a scratch project installed by `pythia-pg install` passes `doctor` |
+| 3b · chat doors | the AskUserQuestion card and its answer hook, the MCP approver | — | an agent in Claude Code and Codex asks for approval in chat the way pythia's does |
+| 3c · scripts and leases | deploy (scripts, one approval per release), lint framework, autopilot leases | script splitting (`$$`), lint rules | a release script lands through one approval, and a lease covers only what it names |
 | 4 · SQL Server | — | pythia-mssql: all tiers, `GO` splitting, `sp_refreshsqlmodule` verify | as Phase 1–3, for SQL Server |
 | 5 · MongoDB | groups that fit documents (validator, index, view, data) | pythia-mongo: command-document classification, validator verify by counting rejected documents | as Phase 1–3, for MongoDB |
 

@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.4.0.dev0 — unreleased
+
+Phase 3a of the plan in DESIGN.md: the harness.
+
+- **`hook pre-tool`, the PreToolUse guard.** It denies the ways around the
+  gate it knows: the engine's raw client given write SQL or a script (also
+  behind `env`, `sudo`, a pipe or `bash -c`), an MCP SQL tool given write
+  SQL, a grant written by hand, the console seam or `grants.mint` from a
+  one-liner, the agent setting `<PREFIX>_CI`, reading `connections.json`,
+  and editing the policy or the journal by hand. It allows without a prompt
+  one plain engine command that cannot write and a confirm with a valid
+  grant on that connection, and stays out of the rest. Commands are read
+  with the CLI's own parser. A crash is no decision.
+- **`hook session-start`:** the rules, how this machine spells the command,
+  and the project's connections and policy.
+- **`install`:** `connections.json` scaffolded once with mode 600, the
+  `.gitignore` lines, the hooks and deny rules in
+  `.claude/settings.local.json` (this interpreter's absolute path), a marked
+  block in CLAUDE.md and AGENTS.md that leaves the developer's text and
+  pythia for Oracle's block alone, and the engine's skills in
+  `.claude/skills` and `.agents/skills`. A second run changes nothing.
+- **`doctor`** checks each piece, including a hook whose interpreter is
+  gone, and exits 1 on a fail. **`skill lint`** is pythia's skill contract.
+- **The harness tier is settled:** `raw_client_pattern`,
+  `write_sql_pattern`, `script_pattern`, `connections_template`,
+  `skills_dir`.
+- **`tests/test_harness.py`** tries each way around the guard: a path
+  spelled with `..`, a capital letter or a symlink, a client behind a
+  wrapper, `&&` after an allowed command, a stranger's `-m` package.
+
 ## 0.3.0.dev0 — unreleased
 
 Phase 2 of the plan in DESIGN.md: the write gate, pythia's Do movement.

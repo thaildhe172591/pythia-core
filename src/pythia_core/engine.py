@@ -40,9 +40,10 @@ CONNECT = (
     "current_schema",   # (conn) -> where an unqualified name lands, or None
 )
 
-# READ was settled in Phase 1 and WRITE in Phase 2 (DESIGN.md). A command is
-# refused by tier, so an engine author can ship one tier at a time. Names are
-# passed as the person typed them: folding them is the engine's business.
+# READ was settled in Phase 1, WRITE in Phase 2 and HARNESS in Phase 3
+# (DESIGN.md). A command is refused by tier, so an engine author can ship one
+# tier at a time. Names are passed as the person typed them: folding them is
+# the engine's business.
 READ = (
     "object_names",     # (conn, schema, pattern, fetch) -> (cols, rows);
                         #    pattern is LIKE-style, at most `fetch` rows
@@ -92,7 +93,18 @@ WRITE = (
                         #    do far more than the task needs, else None
 )
 
-TIERS = {"connect": CONNECT, "read": READ, "write": WRITE}
+HARNESS = (
+    # Settled in Phase 3: what the hooks and `install` need (harness.py).
+    "raw_client_pattern",   # () -> regex naming the engine's own clients
+                            #    (psql), matched where a command starts
+    "write_sql_pattern",    # () -> regex of statements that write
+    "script_pattern",       # () -> regex of a client reading a script or a
+                            #    dump (-f file, < file): always a write path
+    "connections_template",  # () -> the connections.json install scaffolds
+    "skills_dir",           # () -> the folder holding the engine's skills
+)
+
+TIERS = {"connect": CONNECT, "read": READ, "write": WRITE, "harness": HARNESS}
 
 BIND_STYLES = ("named", "pyformat")
 
