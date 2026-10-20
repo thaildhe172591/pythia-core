@@ -7,10 +7,14 @@ install writes, and leaves everything that is not its own byte-identical:
   rewritten (it holds passwords the developer filled in);
 - .gitignore lines that keep the passwords, this machine's approvals and
   this machine's settings out of every clone;
-- .claude/settings.local.json: the hooks, spelled with this interpreter's
-  absolute path (a hook that cannot start fails silently, and the guard it
-  was meant to be goes with it), and deny rules for the engine's files —
-  local, because the path is this machine's;
+- .claude/settings.local.json: the hooks (the guard, the session brief and
+  the AskUserQuestion answer), spelled with this interpreter's absolute path
+  (a hook that cannot start fails silently, and the guard it was meant to be
+  goes with it), and deny rules for the engine's files — local, because the
+  path is this machine's;
+- the MCP approver, in this machine's own files only: Claude Code's local
+  scope for this project (~/.claude.json) and Codex's ~/.codex/config.toml,
+  each when that client has run here; never in a file the team shares;
 - a marked block in CLAUDE.md and AGENTS.md, so the rules load in every
   session whether or not a hook runs; another engine's block (pythia for
   Oracle's among them) is not this one's to touch;
@@ -26,7 +30,7 @@ import re
 import shlex
 import sys
 
-from . import harness, skills
+from . import doors, harness, skills
 from .config import CONFIG_NAME, STATE_DIR, config_rel, state_dir
 
 SETTINGS = pathlib.Path(".claude") / "settings.local.json"
@@ -34,9 +38,17 @@ PRE_TOOL_MATCHERS = ("Bash|Read|Edit|Write|MultiEdit|NotebookEdit", "mcp__.*")
 SKILL_HOMES = (pathlib.Path(".claude") / "skills", pathlib.Path(".agents") / "skills")
 
 
-def hook_command(engine, event):
+def _launcher(engine):
     exe = pathlib.Path(sys.executable).as_posix()
-    return f'"{exe}" -m {harness.module_of(engine)} hook {event}'
+    return f'"{exe}" -m {harness.module_of(engine)}'
+
+
+def hook_command(engine, event):
+    return f"{_launcher(engine)} hook {event}"
+
+
+def answer_hook_command(engine):
+    return f"{_launcher(engine)} approve --hook"
 
 
 def _ours(engine, command):
@@ -44,23 +56,28 @@ def _ours(engine, command):
     cmd = str(command)
     return bool(re.search(
         rf"(-m\s+{re.escape(harness.module_of(engine))}|"
-        rf"{re.escape(engine.command)}(\.exe)?[\"']?)\s+hook\s", cmd))
+        rf"{re.escape(engine.command)}(\.exe)?[\"']?)\s+(hook\s|approve\s+--hook\b)",
+        cmd))
 
 
 def wanted_hooks(engine):
-    def entry(event, matcher=None):
-        e = {"hooks": [{"type": "command", "command": hook_command(engine, event),
-                        "timeout": 15}]}
+    def entry(command, matcher=None):
+        e = {"hooks": [{"type": "command", "command": command, "timeout": 15}]}
         if matcher:
             e = {"matcher": matcher, **e}
         return e
-    return {"SessionStart": [entry("session-start")],
-            "PreToolUse": [entry("pre-tool", m) for m in PRE_TOOL_MATCHERS]}
+    return {"SessionStart": [entry(hook_command(engine, "session-start"))],
+            "PreToolUse": [entry(hook_command(engine, "pre-tool"), m)
+                           for m in PRE_TOOL_MATCHERS],
+            # the chat door; never "" or "*": a hook that catches every tool
+            # makes AskUserQuestion return empty
+            "PostToolUse": [entry(answer_hook_command(engine), "AskUserQuestion")]}
 
 
 def deny_rules(engine):
     rel = f"./{STATE_DIR}/{engine.name}"
-    return [f"Read({rel}/{CONFIG_NAME})", f"Edit({rel}/**)"]
+    return [f"Read({rel}/{CONFIG_NAME})", f"Edit({rel}/**)",
+            f"Bash({engine.command} approve --hook:*)"]
 
 
 def ignore_lines(engine):
@@ -206,6 +223,83 @@ def copy_skills(engine, root):
     return names, written
 
 
+# --- the MCP approver, registered where only this machine reads it ------------------
+
+def project_key(root):
+    """How Claude Code names a project in ~/.claude.json: its absolute path,
+    with forward slashes on Windows."""
+    path = pathlib.Path(root).resolve()
+    return path.as_posix() if os.name == "nt" else str(path)
+
+
+def mcp_entry(engine):
+    return {"type": "stdio", "command": sys.executable,
+            "args": ["-m", harness.module_of(engine), "mcp"], "env": {}}
+
+
+def _home(home=None):
+    return pathlib.Path(home) if home else pathlib.Path.home()
+
+
+def register_claude_mcp(engine, root, home=None):
+    """The approver in Claude Code's local scope for this project: the
+    file is this machine's, so the interpreter's path is right there."""
+    path = _home(home) / ".claude.json"
+    if not path.is_file():
+        return path, "absent"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict):
+            raise ValueError("not an object")
+    except (ValueError, OSError):
+        return path, "unreadable"
+    server, _ = doors.mcp_names(engine)
+    projects = doc.setdefault("projects", {})
+    if not isinstance(projects, dict):
+        return path, "unreadable"
+    proj = projects.setdefault(project_key(root), {})
+    servers = proj.setdefault("mcpServers", {})
+    if servers.get(server) == mcp_entry(engine):
+        return path, "unchanged"
+    servers[server] = mcp_entry(engine)
+    tmp = path.with_name(path.name + f".{engine.name}.tmp")
+    tmp.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n",
+                   encoding="utf-8")
+    os.replace(str(tmp), str(path))           # never a half-written file
+    return path, "updated"
+
+
+def codex_markers(engine):
+    return (f"# {engine.command}:begin (managed by `{engine.command} install`)",
+            f"# {engine.command}:end")
+
+
+def codex_block(engine):
+    server, _ = doors.mcp_names(engine)
+    begin, end = codex_markers(engine)
+    return (f"{begin}\n[mcp_servers.{server}]\n"
+            f"command = {json.dumps(sys.executable)}\n"
+            f'args = ["-m", "{harness.module_of(engine)}", "mcp"]\n{end}')
+
+
+def register_codex_mcp(engine, home=None):
+    """The approver in Codex's own config. The stdlib cannot write TOML, so
+    the block is text between markers; a table of that name written by
+    anyone else is a conflict, reported and left alone."""
+    base = _home(home) / ".codex"
+    path = base / "config.toml"
+    if not base.is_dir():
+        return path, "absent"
+    begin, end = codex_markers(engine)
+    server, _ = doors.mcp_names(engine)
+    old = path.read_text(encoding="utf-8") if path.is_file() else ""
+    if begin not in old and re.search(rf"^\s*\[mcp_servers\.{re.escape(server)}\]",
+                                      old, re.M):
+        return path, "conflict"
+    _, action = merge_block(path, codex_block(engine), begin, end)
+    return path, action
+
+
 def install(engine, root):
     """Wire the project; returns the lines to print."""
     root = pathlib.Path(root)
@@ -228,6 +322,23 @@ def install(engine, root):
         path, action = merge_block(root / name, instructions_block(engine),
                                    begin, end)
         lines.append(f"{action:<10} {name} ({engine.command} block)")
+    for label, (path, action) in (
+            ("~/.claude.json", register_claude_mcp(engine, root)),
+            ("~/.codex/config.toml", register_codex_mcp(engine))):
+        server, tool = doors.mcp_names(engine)
+        if action == "absent":
+            lines.append(f"{'-':<10} {label}: not found (that client has not "
+                         "run here) — re-run install after it has")
+        elif action in ("unreadable", "conflict"):
+            lines.append(f"SKIPPED    {label}: "
+                         + ("does not parse — fix it and re-run"
+                            if action == "unreadable" else
+                            f"[mcp_servers.{server}] is already there and is not "
+                            "ours — left alone")
+                         + f"; the {tool} door is not registered there")
+        else:
+            lines.append(f"{action:<10} {label} (MCP server {server}, "
+                         f"tool {tool})")
     names, written = copy_skills(engine, root)
     lines.append(f"{'updated' if written else 'unchanged':<10} skills "
                  f"({', '.join(names) or 'none shipped'}) in "
@@ -287,6 +398,68 @@ def _starts(command):
     return shutil.which(first) is not None
 
 
+def _breakers(root, home=None):
+    """Settings that answer AskUserQuestion before the developer sees it."""
+    found = []
+    files = _settings_files(root) + [_home(home) / ".claude" / "settings.json",
+                                     _home(home) / ".claude" / "settings.local.json"]
+    for path in files:
+        try:
+            s = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        except (ValueError, OSError):
+            continue
+        if not isinstance(s, dict):
+            continue
+        perms = s.get("permissions") if isinstance(s.get("permissions"), dict) else {}
+        where = path.name if path.parent.parent == pathlib.Path(root) else str(path)
+        if perms.get("defaultMode") == "dontAsk":
+            found.append(f"defaultMode is dontAsk in {where} — it denies "
+                         "AskUserQuestion and the MCP approver")
+        if any(str(r).split("(", 1)[0] == "AskUserQuestion"
+               for r in perms.get("allow") or []):
+            found.append(f"an allow rule for AskUserQuestion in {where} "
+                         "answers it without the developer")
+        for entry in (s.get("hooks") or {}).get("PreToolUse") or []:
+            if isinstance(entry, dict) and entry.get("matcher") in (None, "", "*"):
+                found.append(f"a PreToolUse hook with an empty or '*' matcher in "
+                             f"{where} makes AskUserQuestion return empty")
+                break
+    return found
+
+
+def _chat_door(engine, root, hooks):
+    mine = [c for e, m, c in hooks if e == "PostToolUse"
+            and m == "AskUserQuestion" and "approve --hook" in c]
+    if not mine:
+        return _check("warn", "chat door", "the AskUserQuestion answer hook is "
+                      f"not wired — `{engine.command} install` writes it")
+    if not _starts(mine[0]):
+        return _check("warn", "chat door", f"cannot start: {mine[0]} — "
+                      f"`{engine.command} install` respells it")
+    broken = _breakers(root)
+    if broken:
+        return _check("warn", "chat door", "; ".join(broken))
+    return _check("ok", "chat door", "AskUserQuestion with the card, answered "
+                  "through `approve --hook`")
+
+
+def _mcp_door(engine, root, home=None):
+    server, tool = doors.mcp_names(engine)
+    path = _home(home) / ".claude.json"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        entry = doc["projects"][project_key(root)]["mcpServers"][server]
+    except (ValueError, OSError, KeyError, TypeError):
+        return _check("warn", "mcp approver", f"{tool} is not registered for "
+                      f"this project in ~/.claude.json — `{engine.command} "
+                      "install` registers it once Claude Code has run here")
+    if not os.path.isfile(str(entry.get("command") or "")):
+        return _check("warn", "mcp approver", f"{tool} cannot start: "
+                      f"{entry.get('command')} is gone — `{engine.command} "
+                      "install` respells it")
+    return _check("ok", "mcp approver", f"{tool} (MCP server {server})")
+
+
 def doctor(engine, root):
     root = pathlib.Path(root)
     run = engine.command
@@ -339,6 +512,8 @@ def doctor(engine, root):
                               f"`{run} install` restores its matchers"))
         else:
             out.append(_check("ok", f"hook {label}", shown))
+    out.append(_chat_door(engine, root, hooks))
+    out.append(_mcp_door(engine, root))
     deny = []
     for path in _settings_files(root):
         try:

@@ -147,7 +147,7 @@ def classify_argv(engine, argv):
     if sub in READ_COMMANDS:
         return "read", ns
     if sub == "approve":
-        return ("read" if ns.card else "other"), ns
+        return ("read" if ns.card and not ns.hook else "other"), ns
     if sub == "policy":
         return ("read" if ns.action == "show" else "other"), ns
     if sub == "skill":
@@ -209,6 +209,9 @@ def _reasons(engine):
         "state": (f"{_state_rel(engine)}/ is the gate's record (journal, "
                   f"snapshots): it changes only through {run}. "
                   f"`{run} journal list` / `show` read it."),
+        "hook": (f"`{run} approve --hook` is the client's door: it reads the "
+                 "AskUserQuestion answer Claude Code hands it. Piping a "
+                 "payload in by hand would forge the developer's approval."),
         "ci": (f"{engine.env_prefix}_CI is the pipeline's escape (a CI job "
                "with no console). An agent setting it would be approving its "
                "own write; the developer approves at their console."),
@@ -351,6 +354,9 @@ def _decide(engine, payload, now):
         return _deny(why["ci"])
     if FORGE_RE.search(cmd):
         return _deny(why["forge"])
+    if re.search(r"\bapprove\b[^\n;&|]*\s--hook\b", cmd) and (
+            engine.command in cmd or module_of(engine) in cmd):
+        return _deny(why["hook"])
     kind = _bash_protected(engine, cmd)
     if kind:
         return _deny(why[kind])
@@ -388,7 +394,8 @@ def _decide(engine, payload, now):
 def brief(engine):
     """The rules, in the words every engine's session gets. Engine-neutral:
     the engine's command and label are the only blanks."""
-    run, label = engine.command, engine.label
+    from .doors import mcp_names
+    run, label, tool = engine.command, engine.label, mcp_names(engine)[1]
     return f"""\
 {run.upper()} HARNESS ACTIVE - Learn, Ask, Do. Before any {label} action:
 
@@ -400,10 +407,13 @@ ASK    relay every `{run} apply` preview verbatim and wait for a real yes.
        Refusals and exit 3 (written-but-broken) are relayed, never routed
        around. Never read exit codes through a pipe.
 DO     writes only via `{run} apply <file>` (one statement), never the raw
-       client. The developer approves: `{run} approve <token>` in their
-       own terminal - never mint it; then `{run} apply <file> --confirm
-       <token>`. Evidence before done: `{run} errors`; NOT VERIFIED is said
-       plainly. Skills `using-{run}` routes; the rules are in AGENTS.md."""
+       client. Approval doors - the first that works, the next unasked if
+       one fails: AskUserQuestion, its text exactly the output of
+       `{run} approve --card <token>`, options Approve / Reject (Claude
+       Code); the `{tool}` tool (MCP; Codex starts here);
+       `{run} approve <token>` in the developer's terminal. Never mint it.
+       Then `{run} apply <file> --confirm <token>`. Evidence before done:
+       `{run} errors`; NOT VERIFIED is said plainly. Skills: `using-{run}`."""
 
 
 def state_lines(engine, root):

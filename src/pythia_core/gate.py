@@ -73,16 +73,23 @@ def headless_yes(engine):
 
 
 def approve_headless(engine):
+    from .doors import mcp_names
     return (f"approve is the developer's command — it needs a real console.\n"
-            "Agents relay the preview and ask the developer to run it in their "
-            f"own terminal:\n  {engine.command} approve <token>\n(Approval "
-            "from chat — a dialog or an MCP tool — arrives in Phase 3.)")
+            "From chat, the developer approves through a door instead — the "
+            "first that works, the next unasked if one fails: AskUserQuestion "
+            f"with the text of `{engine.command} approve --card <token>` "
+            f"(Claude Code), then the {mcp_names(engine)[1]} tool (MCP), then "
+            f"their own terminal:\n  {engine.command} approve <token>")
 
 
 def door_lines(engine, token, then):
-    return ["To apply — the developer approves in their own terminal (agents "
-            "cannot run it):",
-            f"    {engine.command} approve {token}",
+    from .doors import mcp_names
+    return ["To apply, the developer approves — the first door that works, the "
+            "next unasked if one fails:",
+            f"  1. AskUserQuestion (Claude Code), its text exactly the output of "
+            f"`{engine.command} approve --card {token}`, options Approve / Reject",
+            f"  2. the {mcp_names(engine)[1]} tool (MCP), with token {token}",
+            f"  3. the developer's own terminal:  {engine.command} approve {token}",
             f"  then the agent:  {then} --confirm {token}"]
 
 
@@ -198,7 +205,8 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
     otype = ident["type"] if ident else group.upper()
     name = ident["name"] if ident else "STATEMENT"
     meta = {"schema": schema, "connection": ns.conn_name, "group": group,
-            "applied": False, "row_set": row_set, **(origin or {})}
+            "applied": False, "row_set": row_set, "then": then,
+            **(origin or {})}
     eid = journal.write_entry(state, otype, name, "\n\n".join(snap.values()),
                               text, meta)
 
@@ -436,6 +444,19 @@ def approval_card(engine, state, token):
     return entry, meta, lines
 
 
+def grant_approval(engine, state, token, meta, approver, session=None):
+    """Record a person's Approve and say what the agent may do now. The
+    console, the chat hook and the MCP elicitation all end here, so no door
+    grants more than another."""
+    grants.prune(state)
+    grants.mint(state, token, meta.get("connection") or "",
+                revalidate=fingerprint_text(meta.get("row_set")),
+                approver=approver, session=session)
+    then = meta.get("then") or f"{engine.command} apply <file>"
+    return (f"grant minted, single use, expires in {grants.TTL_MINUTES} minutes. "
+            f"Run: {then} --confirm {token}")
+
+
 def approve(engine, state, token, card_only=False, as_json=False):
     token = str(token or "").strip().lower()
     if not grants.valid_token(token):
@@ -452,9 +473,8 @@ def approve(engine, state, token, card_only=False, as_json=False):
             print(f"{engine.command} approve {token}")
             print("\n".join(lines))
         return 0
-    grants.prune(state)
-    rec = grants.mint(state, token, meta.get("connection") or "",
-                      revalidate=fingerprint_text(meta.get("row_set")))
+    grant_approval(engine, state, token, meta, "console")
+    rec = grants.read(state, token)
     if as_json:
         print(json.dumps({"ok": True, "token": token, "entry": entry,
                           "card": "\n".join(lines), "minted_at": rec["minted_at"],

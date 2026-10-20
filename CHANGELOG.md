@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.5.0.dev0 — unreleased
+
+Phase 3b of the plan in DESIGN.md: approval from chat.
+
+- **AskUserQuestion, answered through `approve --hook`.** The agent asks with
+  the output of `approve --card <token>` verbatim. Claude Code's PostToolUse
+  hook mints a grant (approver `chat`) only when the question carried that
+  card and the developer chose Approve. It refuses, naming why: the agent's
+  own words, an answer the agent wrote into its own call (checked against
+  the session transcript), a dialog that closed unattended, a typed reply,
+  no answer. Each refusal that is not the developer's no names the next
+  door.
+- **The MCP approver, `mcp`:** a stdio JSON-RPC server with one tool,
+  `<server>_approve`, marked as needing the user. An elicitation shows the
+  card; only an explicit Approve mints (approver `mcp`). A decline faster
+  than anyone could read is the client answering for nobody, and says so.
+- **One grant path.** The console, the hook and the MCP tool all end in
+  `gate.grant_approval`. The journal records the confirm command, so every
+  door says exactly what to run next.
+- **The preview and the refusals name the doors in order:** AskUserQuestion,
+  the MCP tool, the terminal. So do the session brief and the instruction
+  block.
+- **`install`** adds the PostToolUse hook and a deny rule for
+  `approve --hook`, and registers the approver in this machine's files
+  only: Claude Code's local scope for the project (`~/.claude.json`, written
+  atomically, every other key kept) and Codex's `~/.codex/config.toml` (a
+  marked block; a table of that name that is not ours is left alone).
+- **`doctor`** checks both doors, and warns about `dontAsk`, an allow rule
+  for AskUserQuestion, and a PreToolUse hook with an empty or `*` matcher.
+- **The guard** denies `approve --hook` from the agent's shell.
+- **`tests/test_doors.py`** tries each way to mint without a person's
+  Approve on the card, and runs a JSON-RPC session against the MCP server.
+
 ## 0.4.0.dev0 — unreleased
 
 Phase 3a of the plan in DESIGN.md: the harness.

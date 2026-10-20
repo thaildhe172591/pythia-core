@@ -16,6 +16,8 @@ sets out to forge.
 | Re-verification on confirm | a write whose verification moved after approval: something breaks now that the approved preview did not show | a breakage the person saw and approved — that lands, and exits 3 |
 | Approval grant | an agent completing a write no person approved: single use, 15 minutes, bound to the connection | writing the grant file by hand, or faking a console — deliberate forgery, the `policy.json` tier |
 | Console requirement | a headless agent self-approving with `approve` or `--yes`, or loosening the policy | `<PREFIX>_CI=1` for `--yes` and policy, deliberately, in a real pipeline; `approve` has no such escape |
+| Chat door (AskUserQuestion + `approve --hook`) | a grant the developer did not choose: the agent's words instead of the card, an answer the agent wrote into its own call, a dialog that closed unattended, a typed reply, no answer; an agent piping a payload into `approve --hook` (the guard and a deny rule) | a client setting that answers AskUserQuestion itself (`doctor` names `dontAsk`, an allow rule, a `*` matcher); a person who approves without reading |
+| MCP door (elicitation) | a grant without an explicit Approve: a decline, a cancel, a client that declines for nobody in under 1.5 s, a prompt that could not be shown | a client that shows the prompt and accepts it without the person |
 | Read-only session | a read command that writes: the database itself refuses | dblink and foreign data wrappers |
 | PreToolUse guard (`hook pre-tool`) | an agent that follows its rules into a known way around the gate: the raw client given write SQL or a script — named anywhere in the command, so also behind `env`, `sudo`, `docker exec`, `ssh`, a pipe or `bash -c`, an MCP SQL tool given write SQL, a grant written by hand, `grants.mint` or the console seam from a one-liner, the agent setting `<PREFIX>_CI`, reading `connections.json`, editing `policy.json` or the journal | a shell spelling no pattern lists (a variable, an alias, a script file that runs the client); the guard is a hook in the agent's client, and an agent with no hook wired has no guard — `doctor` says so |
 | Deny rules (`install`) | Claude Code's own tools reading `connections.json` or editing the engine's folder, even with no hook running | the shell, which the rules do not cover |
@@ -33,9 +35,10 @@ sets out to forge.
   `install` wired it (Claude Code). An agent whose client runs no hooks is
   held by the instruction block install writes into AGENTS.md and by the
   gate's own checks, not by the guard.
-- **Approval is console-only in Phase 3a.** The chat doors (a dialog card and
-  an MCP approver) arrive in Phase 3b. An agent cannot approve from chat
-  today, and must ask the developer to run `approve` in a terminal.
+- **A chat door trusts the client that draws it.** The hook reads the
+  answer Claude Code hands it, and the elicitation the answer Codex returns.
+  A client that answers for the person defeats both; the terminal door is
+  the one that needs no client at all.
 - **The probe runs before approval.** An UPDATE or DELETE is approved on its
   row set, so its own table and predicate are queried before anyone
   approves. That text comes from the file about to run, so it opens no door

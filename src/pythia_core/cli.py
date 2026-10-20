@@ -16,7 +16,7 @@ import os
 import pathlib
 import sys
 
-from . import __version__, gate, harness, install, journal, policy, skills
+from . import __version__, doors, gate, harness, install, journal, policy, skills
 from .config import (config_rel, connection_summary, find_config,
                      resolve_connection, state_dir)
 from .engine import refuse_unless
@@ -34,7 +34,7 @@ COMMAND_TIERS = {"check": ("connect",), "ls": READ_TIERS, "src": READ_TIERS,
                  "deps": READ_TIERS, "impact": READ_TIERS, "errors": READ_TIERS,
                  "apply": WRITE_TIERS, "restore": WRITE_TIERS}
 OFFLINE = ("version", "connections", "approve", "policy", "history", "journal",
-           "hook", "install", "doctor", "skill")
+           "hook", "install", "doctor", "skill", "mcp")
 
 
 def build_parser(engine):
@@ -112,9 +112,13 @@ def build_parser(engine):
     s = sub.add_parser("approve", parents=[common()],
                        help="the developer approves a previewed token (a real "
                             "console only)")
-    s.add_argument("token")
+    s.add_argument("token", nargs="?")
     s.add_argument("--card", action="store_true",
                    help="print what would be approved; mint nothing")
+    s.add_argument("--hook", action="store_true",
+                   help="the AskUserQuestion answer, read from Claude Code's "
+                        "PostToolUse payload on stdin (the client runs this, "
+                        "never an agent)")
     s = sub.add_parser("policy", parents=[common()],
                        help="the write policy per statement group")
     s.add_argument("action", nargs="?", choices=("show", "set"), default="show")
@@ -142,6 +146,8 @@ def build_parser(engine):
     s = sub.add_parser("hook", help="entry point for the agent client's hooks "
                                     "(reads its payload on stdin)")
     s.add_argument("event", choices=("pre-tool", "session-start"))
+    sub.add_parser("mcp", help="the MCP approver on stdio (the agent's client "
+                               "starts it)")
     return p
 
 
@@ -345,8 +351,18 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "cols": cmd_cols,
 # --- offline: the developer's half and the record ------------------------------------
 
 def cmd_approve(engine, ns):
+    if not ns.token:
+        sys.exit(f"Usage: {engine.command} approve <token>")
     return gate.approve(engine, ns.state, ns.token, card_only=ns.card,
                         as_json=ns.json)
+
+
+def _state_for(engine, payload):
+    """The engine's folder for the project a hook payload names."""
+    cwd = pathlib.Path((payload or {}).get("cwd") or os.getcwd()) \
+        if isinstance(payload, dict) else pathlib.Path.cwd()
+    _, root = find_config(cwd, os.environ, engine)
+    return state_dir(root if root is not None else cwd, engine)
 
 
 def cmd_policy(engine, ns):
@@ -517,6 +533,10 @@ def main(engine, argv=None):
         # before any config is read: a hook fails silent, never with an exit
         sys.stdout.write(harness.run_hook(engine, ns.event))
         return 0
+    if ns.command == "approve" and ns.hook:
+        sys.stdout.write(doors.run_answer_hook(
+            engine, lambda payload: _state_for(engine, payload)))
+        return 0
     cwd = pathlib.Path.cwd()
     cfg, root = find_config(cwd, os.environ, engine)
     ns.root = pathlib.Path(root) if root is not None else cwd
@@ -528,6 +548,9 @@ def main(engine, argv=None):
         key = "restore"
         if not ns.id:
             sys.exit(f"Usage: {engine.command} journal restore <entry>")
+    if key == "mcp":
+        doors.mcp_serve(engine, ns.state, sys.stdin, sys.stdout)
+        return 0
     if key in OFFLINE_COMMANDS:
         return OFFLINE_COMMANDS[key](engine, ns)
     # refusals that need no database come first — an unreachable database

@@ -22,9 +22,11 @@ from pythia_core import cli, grants, harness, skills  # noqa: E402
 @contextlib.contextmanager
 def project(config=True):
     keep_env = {k: os.environ.pop(k) for k in list(os.environ)
-                if k.startswith("PYTHIA_")}
+                if k.startswith("PYTHIA_") or k in ("HOME", "USERPROFILE")}
     keep_cwd = os.getcwd()
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        # install registers the approver in the home folder: never the real one
+        os.environ["HOME"] = os.environ["USERPROFILE"] = home
         root = pathlib.Path(td).resolve()
         if config:
             cfg = root / ".pythia" / "fake" / "connections.json"
@@ -39,6 +41,8 @@ def project(config=True):
             yield root
         finally:
             os.chdir(keep_cwd)
+            for k in ("HOME", "USERPROFILE"):
+                os.environ.pop(k, None)
             os.environ.update(keep_env)
 
 

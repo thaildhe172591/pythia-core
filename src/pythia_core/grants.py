@@ -28,7 +28,8 @@ def path(state, token):
     return root(state) / f"{token}.json"
 
 
-def mint(state, token, conn_name, now=None, revalidate=None, approver="console"):
+def mint(state, token, conn_name, now=None, revalidate=None, approver="console",
+         session=None):
     now = now or datetime.datetime.now()
     rec = {"token": token,
            "conn": conn_name or "",
@@ -37,7 +38,8 @@ def mint(state, token, conn_name, now=None, revalidate=None, approver="console")
                minutes=TTL_MINUTES)).isoformat(timespec="seconds"),
            "used_at": None,
            "revalidate": revalidate or None,
-           "approver": approver}
+           "approver": approver,
+           "session": session}
     root(state).mkdir(parents=True, exist_ok=True)
     path(state, token).write_text(json.dumps(rec, indent=2) + "\n",
                                   encoding="utf-8")

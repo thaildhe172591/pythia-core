@@ -4,7 +4,7 @@ The part of pythia that is the same for every database. Engine packages
 build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres)
 first, then SQL Server and MongoDB.
 
-**Pre-alpha (Phase 3a).** What is here today:
+**Pre-alpha (Phase 3b).** What is here today:
 - the engine contract and its conformance check;
 - per-engine connection resolution;
 - the query-contract lint;
@@ -13,14 +13,17 @@ first, then SQL Server and MongoDB.
   - the read commands `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact`
     and `errors`, windowed and never truncated silently;
   - the write gate: `apply` (snapshot, rehearse inside a transaction and
-    roll back, preview), `approve` (the developer, at a console),
+    roll back, preview), `approve` (the developer: at a console, or from
+    chat through AskUserQuestion and `approve --hook`, or the MCP approver
+    `mcp`),
     `apply --confirm` (commits only what was approved), `policy`,
     `journal list | show | restore` and `history`;
   - the harness: `hook pre-tool` (the guard that denies the ways around the
     gate and waves through what cannot write), `hook session-start` (the
     rules and the project's state), `install` (connections scaffold,
-    `.gitignore`, hooks, instruction blocks, skills — a second run changes
-    nothing), `doctor` and `skill lint`.
+    `.gitignore`, hooks, the MCP approver in this machine's own files,
+    instruction blocks, skills — a second run changes nothing), `doctor` and
+    `skill lint`.
 
 What each gate stops, and what it does not, is in
 [SECURITY.md](SECURITY.md). The plan, and how each idea maps to each
@@ -76,6 +79,7 @@ python tests/test_cli.py
 python tests/test_read.py
 python tests/test_gate.py
 python tests/test_harness.py
+python tests/test_doors.py
 ```
 
 CI runs them on Ubuntu, Windows and macOS, Python 3.9 and 3.13.
