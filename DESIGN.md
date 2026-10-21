@@ -2,8 +2,8 @@
 
 Status: **0.1.1** (October 2026). This document is the
 plan; the code in this repository is every phase of it so far.
-pythia-postgres, pythia-mssql and pythia-mongo run on all of it, and run
-side by side in one project; pythia-mysql is being built on it (Phase 9).
+pythia-postgres, pythia-mssql, pythia-mongo and pythia-mysql run on all of
+it, and run side by side in one project.
 Where the two disagree, the
 code is what runs and this document is wrong — fix it in the same change.
 
@@ -37,7 +37,8 @@ learns that these packages exist.
 | pythia-mysql | `pythia-mysql` | `pythia_mysql` | `pythia-mysql` | PyMySQL (settled in Phase 9, §8) | `.pythia/mysql/` |
 
 pythia-core and the first three engines are on PyPI (§8, question 4);
-pythia-mysql installs from git until its first release.
+pythia-mysql's first release, 0.1.0, is prepared and follows pythia-core
+0.1.1 there.
 
 ## 2. Living next to pythia for Oracle
 
@@ -84,7 +85,7 @@ family adds must not collide with one pythia already uses:
   so installing or re-installing engines in any order changes nothing that
   is not its own. Phase 6 holds all of this in `tests/test_family.py` (two
   fake engines and pythia for Oracle's block and hooks) and in CI's `family`
-  job (`tests/family_check.py`, the three real engines installed after
+  job (`tests/family_check.py`, the four real engines installed after
   pythia for Oracle).
 - **Instructions per engine.** Each engine's install writes its own marked
   block into CLAUDE.md and AGENTS.md (`<!-- pythia-pg:begin ... -->`); pythia's
@@ -382,9 +383,9 @@ does this for PostgreSQL.
 | Read-only session | `SET TRANSACTION READ ONLY` | `default_transaction_read_only` (psycopg `read_only`). `dblink`/FDW reach past it | none (`SET TRANSACTION READ ONLY` is a syntax error): a least-privilege login (`db_datareader`, `VIEW DEFINITION`) is the line, and a read command's transaction is never committed | none: a user holding only the `read` role is the line, and every command a read sends is a file the suite holds to reads only | `SET SESSION TRANSACTION READ ONLY`: MySQL refuses DML and DDL alike (1792), the implicit transaction after a commit included |
 | Row-set check before DML | count + `ORA_HASH` fingerprint | count + order-independent aggregate of `md5(row::text)` | count + `CHECKSUM_AGG(BINARY_CHECKSUM(*))` | `countDocuments` + fingerprint of matched `_id`s | count + an order-free sum of `md5(json_array(...))` over every column; the connection asks for the rows an UPDATE matched (`CLIENT_FOUND_ROWS`) |
 | Plan without running | `EXPLAIN PLAN` + `DBMS_XPLAN` | `EXPLAIN` without `ANALYZE` (`ANALYZE` executes: refused) | `SET SHOWPLAN_XML ON` | `explain("queryPlanner")` (`executionStats` executes: refused) | `EXPLAIN` (`EXPLAIN ANALYZE` executes: refused) |
-| Script splitting | `;` and `/`, q-quotes, SQL*Plus directives refused | `;`, dollar quotes `$tag$`, `E''` strings; psql meta-commands (`\i`, `\gexec`) refused | `GO` separator (a client construct, not T-SQL); `CREATE PROCEDURE` must open its batch | one command document per file (Extended JSON). JavaScript is refused, as pythia refuses anonymous PL/SQL blocks | `;`, and `DELIMITER` (a client construct) around bodies that hold `;`, as the mysql client and Flyway read them (Phase 9c) |
+| Script splitting | `;` and `/`, q-quotes, SQL*Plus directives refused | `;`, dollar quotes `$tag$`, `E''` strings; psql meta-commands (`\i`, `\gexec`) refused | `GO` separator (a client construct, not T-SQL); `CREATE PROCEDURE` must open its batch | one command document per file (Extended JSON). JavaScript is refused, as pythia refuses anonymous PL/SQL blocks | `;`, and `DELIMITER` (a client construct) around bodies that hold `;`, as the mysql client and Flyway read them; a stored program takes its whole file. A release holds data only: MySQL commits DDL as it runs it |
 | Comments on objects | `COMMENT ON` | `COMMENT ON` (`obj_description`, `col_description`) | extended property `MS_Description` | none: a `$jsonSchema` `description` | `COMMENT` clauses on tables, columns, indexes, routines and events; none on views |
-| Raw clients the guard denies | `sqlplus`, `sql`, SQLcl MCP `run-sql` | `psql` (and `pg_restore` into a database) | `sqlcmd`, `osql`, `isql`, `mssql-cli`, `Invoke-Sqlcmd`; `bcp ... in`; `sqlpackage` Publish and Import. A procedure first in a batch needs no `EXEC`, so any `sp_`/`xp_` name counts as a write | `mongosh` and `mongo` given a write method, `$out`, `$merge`, `load()` or a script; `mongoimport`, `mongorestore`, `mongofiles`; an MCP tool named for a write (`insert-many`, `drop-collection`) or given a writing command document | `mysql`, `mysqlsh`, `mysqlimport`, a dump fed to a client (Phase 9c) |
+| Raw clients the guard denies | `sqlplus`, `sql`, SQLcl MCP `run-sql` | `psql` (and `pg_restore` into a database) | `sqlcmd`, `osql`, `isql`, `mssql-cli`, `Invoke-Sqlcmd`; `bcp ... in`; `sqlpackage` Publish and Import. A procedure first in a batch needs no `EXEC`, so any `sp_`/`xp_` name counts as a write | `mongosh` and `mongo` given a write method, `$out`, `$merge`, `load()` or a script; `mongoimport`, `mongorestore`, `mongofiles`; an MCP tool named for a write (`insert-many`, `drop-collection`) or given a writing command document | `mysql`, `mysqlsh` and `mariadb` given write SQL (`CALL`, `DO`, `PREPARE`/`EXECUTE`, `LOAD DATA`, `SET GLOBAL`, `INTO OUTFILE`, `source`) or a script (`< file`, a pipe, `mysqlsh -f`), MySQL Shell's `util.load*`; `mysqlimport`; `mysqladmin`'s writing subcommands |
 | The tool's own statements | `queries/`, one file each | `queries/*.sql`, pyformat binds | `queries/*.sql`, pyformat binds (`%%` adapted for pymssql) | `commands/*.json`: a command document, each bind a `{"$bind": ...}` value | `queries/*.sql`, pyformat binds (PyMySQL formats with `%`), the same under any `sql_mode` |
 | Identifier case | unquoted folds to upper | unquoted folds to lower | per collation (usually case-insensitive) | case-sensitive | table and schema names as `lower_case_table_names` says (case-sensitive on Linux by default); routine and column names case-insensitive |
 | "Schema" | user / schema | schema (inside a database); the default is `public` | schema (`dbo` by default) | database | database |
@@ -467,7 +468,7 @@ against a real database (a disposable container, never a shared one).
 | 8 · minimum versions · done | `floor_warning` (optional, in no tier): `check` says when the server is older than the engine's floor, and refuses nothing | the live check on PostgreSQL 14 to 18, SQL Server 2017 to 2025 and MongoDB 7.0 and 8.0; each engine's floor (14, 2017, 7.0) read from the server's own version number | every version CI runs passes the whole live check, and `check` warns below each floor |
 | 9a · MySQL reads · done | — | pythia-mysql: the driver spike (§8), connect and read tiers — read sessions `READ ONLY`; `impact` through view usage, triggers and foreign keys, then routine, trigger and event bodies by name; what the account cannot see read from `SHOW GRANTS` and named; `errors` as the views MySQL marked invalid; `src` and `ddl` rebuilt; CI against MySQL 8.4, 9.4 and 9.5 | every read command passes against a fixture on a real server as a least-privilege account, with and without `TRIGGER` and `EVENT`, and every `ddl` runs into a copy that matches its original |
 | 9b · MySQL writes · done | — (the predict tier of Phase 5b) | data rehearsed in a transaction, first inside a savepoint so a write MySQL cannot roll back (warning 1196) is `escaped`; rows checked by count and an order-free sum of `md5(json_array(...))`; DDL predicted — a view's SELECT run with `LIMIT 0`, the views MySQL would mark invalid read from information_schema — then written once and read back (exit 3 when it differs); routines `NOT VERIFIED`; a CREATE for an existing routine replaces it, checked under a scratch name first, the old one put back if MySQL refuses the new; snapshot and restore | as Phase 2, for MySQL, with every prediction checked against what the write did, a MyISAM leak reported `WRITTEN?`, and a restore that needs `SET_ANY_DEFINER` refused with nothing written |
-| 9c · MySQL harness | — | harness (`mysql`, `mysqlsh`, `mysqlimport`), release (`DELIMITER`, `BEGIN ... END` bodies) and lint tiers, the `pythia-mysql-*` skills, the `family` job with four engines, release 0.1.0 | as Phase 3, for MySQL |
+| 9c · MySQL harness · done | — | the harness tier (the `mysql`, `mysqlsh`, `mariadb` clients, `mysqlimport`, `mysqladmin`), the release tier (`DELIMITER` and stored-program bodies; a release is data only, its DDL refused with nothing written), ten lint rules (`mysql-non-transactional` the one error), the seven `pythia-mysql-*` skills, the `family` job with four engines, 0.1.0 prepared | as Phase 3, for MySQL: the live check lands a release whole, rolls one back whole when its rows move after approval, shows a lint error in a real preview, and lands a predicted write under a lease |
 
 Not planned: moving pythia for Oracle onto pythia-core. That would be the
 owner's decision, taken after Phase 3, when there is a core worth moving to.

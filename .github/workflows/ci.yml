@@ -45,7 +45,7 @@ jobs:
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          for repo in pythia pythia-postgres pythia-mssql pythia-mongo; do
+          for repo in pythia pythia-postgres pythia-mssql pythia-mongo pythia-mysql; do
             url="https://github.com/thaildhe172591/$repo"
             ref=main
             if git ls-remote --exit-code --heads "$url" "$BRANCH" >/dev/null 2>&1; then
@@ -54,7 +54,7 @@ jobs:
             echo "$repo at $ref"
             git clone --quiet --depth 1 --branch "$ref" "$url" "../$repo"
           done
-          pip install . ../pythia-postgres ../pythia-mssql ../pythia-mongo
+          pip install . ../pythia-postgres ../pythia-mssql ../pythia-mongo ../pythia-mysql
       - run: python tests/family_check.py --oracle ../pythia
 
   package:

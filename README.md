@@ -4,10 +4,9 @@
 
 The part of pythia that is the same for every database. Engine packages
 build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres),
-[pythia-mssql](https://github.com/thaildhe172591/pythia-mssql) and
-[pythia-mongo](https://github.com/thaildhe172591/pythia-mongo);
-[pythia-mysql](https://github.com/thaildhe172591/pythia-mysql) is being built
-(Phase 9).
+[pythia-mssql](https://github.com/thaildhe172591/pythia-mssql),
+[pythia-mongo](https://github.com/thaildhe172591/pythia-mongo) and
+[pythia-mysql](https://github.com/thaildhe172591/pythia-mysql).
 
 **Alpha (0.1.1).** What is here today:
 - the engine contract and its conformance check;
@@ -113,7 +112,7 @@ python tests/test_family.py     # several engines in one project, with two fakes
 ```
 
 CI runs them on Ubuntu, Windows and macOS, Python 3.9 and 3.13. Its
-`family` job also installs pythia for Oracle and the three engines into one
+`family` job also installs pythia for Oracle and the four engines into one
 project and runs `tests/family_check.py`: every install keeps the others'
 hooks and blocks, a second run changes nothing, each doctor passes, each
 guard and answer hook acts for its own engine only.

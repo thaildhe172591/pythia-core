@@ -4,10 +4,9 @@
 
 Phần của pythia giống nhau ở mọi database. Các engine package xây trên nó:
 [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres),
-[pythia-mssql](https://github.com/thaildhe172591/pythia-mssql) và
-[pythia-mongo](https://github.com/thaildhe172591/pythia-mongo);
-[pythia-mysql](https://github.com/thaildhe172591/pythia-mysql) đang được xây
-(Phase 9).
+[pythia-mssql](https://github.com/thaildhe172591/pythia-mssql),
+[pythia-mongo](https://github.com/thaildhe172591/pythia-mongo) và
+[pythia-mysql](https://github.com/thaildhe172591/pythia-mysql).
 
 **Alpha (0.1.1).** Những gì đã có:
 - engine contract và bộ kiểm tra tuân thủ của nó;
@@ -112,7 +111,7 @@ python tests/test_family.py     # several engines in one project, with two fakes
 ```
 
 CI chạy chúng trên Ubuntu, Windows và macOS, Python 3.9 và 3.13. Job
-`family` của nó còn cài pythia cho Oracle và ba engine vào một project rồi
+`family` của nó còn cài pythia cho Oracle và bốn engine vào một project rồi
 chạy `tests/family_check.py`: mỗi lần install giữ nguyên hook và khối hướng
 dẫn của các bên khác, chạy lần hai không đổi gì, doctor của từng engine đều
 qua, và guard cùng answer hook của mỗi engine chỉ hành động cho chính nó.

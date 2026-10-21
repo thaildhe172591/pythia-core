@@ -16,6 +16,11 @@ on every version.
   rehearsed. The engine needs nothing new from the core.
 - **SECURITY names MySQL's limits**: a rehearsal that writes to a table MySQL
   cannot roll back is reported escaped; a routine is replaced in two steps.
+- **The `family` job installs pythia-mysql too**: `tests/family_check.py`
+  runs four real engines after pythia for Oracle, and a SQL-sounding MCP
+  tool is denied by all three SQL engines without any claiming it.
+- **DESIGN marks Phase 9 done**: pythia-mysql has its harness, its release
+  of data, ten lint rules and seven skills, and its 0.1.0 is prepared.
 
 ## 0.1.0 — 2026-10-21
 

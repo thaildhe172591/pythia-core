@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """The real engines in one project: what tests/test_family.py proves with
-two fakes, checked with pythia-pg, pythia-mssql and pythia-mongo installed
-side by side — and pythia for Oracle's install before them, when its
-checkout is named.
+two fakes, checked with pythia-pg, pythia-mssql, pythia-mongo and
+pythia-mysql installed side by side — and pythia for Oracle's install
+before them, when its checkout is named.
 
     python tests/family_check.py [--oracle PATH/TO/pythia]
 
-Needs the three engines installed in this interpreter (CI's `family` job
+Needs the four engines installed in this interpreter (CI's `family` job
 installs them from the branch of the same name, or main). Touches no
 database: everything runs in a temporary project and a temporary home.
 """
@@ -20,7 +20,8 @@ import tempfile
 
 ENGINES = {"pythia-pg": ("pythia_postgres", "postgres"),
            "pythia-mssql": ("pythia_mssql", "mssql"),
-           "pythia-mongo": ("pythia_mongo", "mongo")}
+           "pythia-mongo": ("pythia_mongo", "mongo"),
+           "pythia-mysql": ("pythia_mysql", "mysql")}
 PY = sys.executable
 
 
@@ -108,18 +109,22 @@ def check_guards(root):
         (bash('mongosh app --eval "db.t_order.drop()"'), {"pythia-mongo": "deny"}),
         (bash("mongoimport --db app --collection t_order --file x.json"),
          {"pythia-mongo": "deny"}),
+        (bash('mysql app_owner -e "drop table t_order"'), {"pythia-mysql": "deny"}),
+        (bash("docker exec db mysql app_owner < fix.sql"), {"pythia-mysql": "deny"}),
         (bash(f"{PY} -m pythia_postgres ls t_order"), {"pythia-pg": "allow"}),
         (bash("pythia-mssql cols t_order"), {"pythia-mssql": "allow"}),
         (bash("pythia-mongo impact t_order"), {"pythia-mongo": "allow"}),
+        (bash("pythia-mysql src p_order_paid"), {"pythia-mysql": "allow"}),
         (bash("pythia-pg grep mongosh"), {"pythia-pg": "allow"}),
+        (bash("pythia-mysql grep sqlcmd"), {"pythia-mysql": "allow"}),
         (("mcp__mongodb__delete-many", {"collection": "t_order", "filter": {}}),
          {"pythia-mongo": "deny"}),
         (("mcp__mongodb__aggregate", {"pipeline": [{"$merge": "t_copy"}]}),
          {"pythia-mongo": "deny"}),
-        # a SQL-sounding tool may reach either SQL database: both deny it,
-        # and neither claims it
+        # a SQL-sounding tool may reach any SQL database: each denies it,
+        # and none claims it
         (("mcp__postgres__query", {"sql": "delete from t_order"}),
-         {"pythia-pg": "deny", "pythia-mssql": "deny"}),
+         {"pythia-pg": "deny", "pythia-mssql": "deny", "pythia-mysql": "deny"}),
     ]
     for (tool, tin), want in cases:
         for command in ENGINES:
