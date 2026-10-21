@@ -148,19 +148,24 @@ def write_gitignore(engine, root):
 def merge_settings(engine, settings):
     """Our hooks and deny rules into Claude Code's settings, in place.
     Every key and hook that is not ours survives in its order; ours are
-    replaced, so a re-run with a moved interpreter respells them."""
+    replaced where they stood (appended the first time), so a re-run with a
+    moved interpreter respells them, and a re-run among other engines' hooks
+    moves nothing."""
     hooks = settings.setdefault("hooks", {})
     for event, ours in wanted_hooks(engine).items():
-        kept = []
+        kept, at = [], None
         for entry in hooks.get(event) or []:
             if not isinstance(entry, dict):
                 kept.append(entry)
                 continue
             inner = [h for h in entry.get("hooks") or []
                      if not (isinstance(h, dict) and _ours(engine, h.get("command")))]
+            if at is None and len(inner) != len(entry.get("hooks") or []):
+                at = len(kept)
             if inner:
                 kept.append({**entry, "hooks": inner})
-        hooks[event] = kept + ours
+        at = len(kept) if at is None else at
+        hooks[event] = kept[:at] + ours + kept[at:]
     deny = settings.setdefault("permissions", {}).setdefault("deny", [])
     deny.extend(r for r in deny_rules(engine) if r not in deny)
     return settings

@@ -1,8 +1,9 @@
 # The pythia family — design
 
-Status: **Phase 5 complete** (October 2026). This document is the plan; the
+Status: **Phase 6 complete** (October 2026). This document is the plan; the
 code in this repository is every phase of it so far. pythia-postgres,
-pythia-mssql and pythia-mongo run on all of it. Where the two disagree, the
+pythia-mssql and pythia-mongo run on all of it, and run side by side in one
+project. Where the two disagree, the
 code is what runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
@@ -61,6 +62,26 @@ family adds must not collide with one pythia already uses:
   (`psql`, `sqlcmd`, `mongosh`), spelled `<command> hook pre-tool`. A guard
   denies, allows or stays out; Claude Code lets any deny win, so two in one
   agent compose safely: neither can wave through what the other denies.
+  Each allows only its own commands, and a guard that finds an MCP tool by
+  its SQL-sounding name — which pythia-pg's and pythia-mssql's both do —
+  denies a write through it without claiming the tool: it cannot tell
+  which database the tool reaches.
+- **Answers per engine.** Every engine's AskUserQuestion answer hook runs on
+  every question. A hook answers only its own engine's card: a question that
+  names another pythia tool's `approve` (another engine's card, pythia's
+  `pythia approve`) is left to that tool, so the agent never hears "no
+  pending preview carries that token" from the wrong engine beside the
+  right one's "approved". pythia for Oracle is not built on this core: its
+  own hook still answers a family engine's card that way, and its doctor
+  warns that the family's hooks are launchers it does not run. Both are
+  noise, not a way around a gate, and pythia for Oracle stays as it is.
+- **Settings per engine.** Each install replaces its own hooks where they
+  stood in `.claude/settings.local.json` (appending them the first time),
+  so installing or re-installing engines in any order changes nothing that
+  is not its own. Phase 6 holds all of this in `tests/test_family.py` (two
+  fake engines and pythia for Oracle's block and hooks) and in CI's `family`
+  job (`tests/family_check.py`, the three real engines installed after
+  pythia for Oracle).
 - **Instructions per engine.** Each engine's install writes its own marked
   block into CLAUDE.md and AGENTS.md (`<!-- pythia-pg:begin ... -->`); pythia's
   `<!-- pythia:begin ... -->` block is a different marker and is left alone.
@@ -433,6 +454,7 @@ against a real database (a disposable container, never a shared one).
 | 5a · MongoDB reads · done | `cols` may name a blind spot (columns inferred from a sample); the `document` bind style | pythia-mongo: pymongo, every command a reviewable file (`commands/`), connect and read tiers — `cols` from a sample, `impact` through view pipelines, `errors` as the documents a validator rejects and views that fail; CI against MongoDB 7.0 and 8.0 replica sets | every read command passes against a fixture on a real server as a `read`-role user, and `ddl` rebuilds what it describes |
 | 5b · MongoDB writes · done | a second write path for what cannot be rehearsed: predicted before approval, written, verified after — exit 3 when the result differs from the prediction | data rehearsed in a transaction (a replica set is required); validators, indexes and views predicted (the documents a validator would reject, the duplicates a unique index would meet, a view's first documents); snapshot and restore | as Phase 2, for MongoDB, with every prediction checked against what the write did |
 | 5c · MongoDB harness · done | the MCP hooks (`mcp_tool_pattern`, `mcp_write_tool_pattern`); an MCP tool's input read as a document too, keys included; a script read inside a quoted command (`bash -c '...'`); a predicted write's report says it was read back | harness (`mongosh`, `mongo`, `mongoimport`, `mongorestore`, `mongofiles`, MongoDB's MCP tools by name), release (a data release: one command document or a JSON array of them per file) and lint tiers (seven rules over validators, indexes and updates), the `pythia-mongo-*` skills | as Phase 3, for MongoDB: `install` field-tested, and a release, a lint finding and a lease write on a real server |
+| 6 · several engines in one project · done | an answer hook leaves another tool's card alone; a SQL-sounding MCP tool is denied without being claimed; an install replaces its hooks where they stood; `test_family.py` and the `family` CI job | — | pythia for Oracle and the three engines install into one project in any order, a second run changes nothing, each doctor passes, and each guard and answer hook acts for its own engine only |
 
 Not planned: moving pythia for Oracle onto pythia-core. That would be the
 owner's decision, taken after Phase 3, when there is a core worth moving to.

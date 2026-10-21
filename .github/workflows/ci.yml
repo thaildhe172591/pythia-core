@@ -29,6 +29,33 @@ jobs:
       - run: python tests/test_release.py
       - run: python tests/test_lease.py
       - run: python tests/test_lint.py
+      - run: python tests/test_family.py
+
+  family:
+    # the real engines side by side in one project, after pythia for Oracle:
+    # what tests/test_family.py proves with two fakes. Each from the branch of
+    # the same name when one exists, or main.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: the engines and pythia for Oracle
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          for repo in pythia pythia-postgres pythia-mssql pythia-mongo; do
+            url="https://github.com/thaildhe172591/$repo"
+            ref=main
+            if git ls-remote --exit-code --heads "$url" "$BRANCH" >/dev/null 2>&1; then
+              ref="$BRANCH"
+            fi
+            echo "$repo at $ref"
+            git clone --quiet --depth 1 --branch "$ref" "$url" "../$repo"
+          done
+          pip install . ../pythia-postgres ../pythia-mssql ../pythia-mongo
+      - run: python tests/family_check.py --oracle ../pythia
 
   package:
     runs-on: ubuntu-latest

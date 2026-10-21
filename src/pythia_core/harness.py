@@ -234,8 +234,18 @@ def _reasons(engine):
                 f"If the developer wants to run it by hand, hand them the file "
                 f"and the restore from `{run} history`."),
         "mcp": (f"Writes go through `{run} apply <file>` (one statement): "
-                "snapshot, rehearsal, preview, approval, journal. A SQL tool "
-                "would write with none of them; it is for reads here."),
+                "snapshot, rehearsal, preview, approval, journal. This "
+                f"{engine.label} MCP tool would write with none of them; it is "
+                "for reads here."),
+        # a tool found by its SQL-sounding name may reach another database:
+        # another engine's guard in the same project reads it too
+        "mcp_sql": ("This MCP tool's name says SQL, and its input writes; "
+                    f"{run} cannot tell which database it reaches. If it is "
+                    f"{engine.label}, writes go through `{run} apply <file>` "
+                    "(one statement): snapshot, rehearsal, preview, approval, "
+                    "journal — this tool has none of them, and is for reads. "
+                    "Another database's writes go through that database's own "
+                    "gate."),
     }
 
 
@@ -384,7 +394,7 @@ def _decide(engine, payload, now):
         pattern = engine.write_sql_pattern()
         if re.search(pattern, " ".join(_strings(tin)), re.I) or \
                 re.search(pattern, json.dumps(tin, ensure_ascii=False, default=str), re.I):
-            return _deny(why["mcp"])
+            return _deny(why["mcp"] if named else why["mcp_sql"])
         return None
 
     if tool != "Bash":

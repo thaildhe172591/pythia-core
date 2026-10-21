@@ -209,9 +209,25 @@ def test_an_engine_can_name_its_databases_mcp_tools_and_their_writes():
         assert decide("mcp__mongodb__run_command", command={"drop": "t_order"}) == "deny"
         assert decide("mcp__mongodb__aggregate", pipeline=[{"$merge": "t_copy"}]) == "deny"
         assert decide("mcp__mongodb__find", filter={"note": "dropped"}) is None
+        # a tool the engine names is its database's, and the reason says so
+        why = reason(harness.pre_tool_decision(DocumentEngine(), {
+            "tool_name": "mcp__mongodb__drop-collection", "tool_input": {},
+            "cwd": str(root)}))
+        assert "FakeDB" in why and "SQL" not in why, why
         assert decide("mcp__github__create_issue", body="drop table t") is None
         assert decide("mcp__warehouse__run_sql", sql="drop table t") is None   # not its tool
         assert decide("mcp__pythia_fake__approve", token="abc123") is None
+
+
+def test_a_sql_tool_another_engine_may_own_is_denied_without_claiming_it():
+    # pythia-pg and pythia-mssql in one project: both guards read any tool
+    # whose name sounds like SQL. Each denies a write through it, but neither
+    # can tell which database it reaches, and must not send the agent to its
+    # own apply for another database's write
+    with project() as root:
+        why = reason(tool(root, "mcp__postgres__query", sql="delete from t_order"))
+        assert "cannot tell which database" in why and "FakeDB" in why, why
+        assert "that database's own" in why, why
 
 
 def test_an_engine_without_the_harness_tier_is_refused_and_its_hook_is_silent():

@@ -25,9 +25,11 @@ import re
 import sys
 import time
 
-from . import __version__, gate
+from . import __version__, gate, harness
 
 TOKEN_IN_QUESTION = re.compile(r"\bapprove\s+(?:--card\s+)?([0-9a-z]{6,10})\b", re.I)
+# the word before `approve`: whose command the question names
+NAMED_BEFORE = re.compile(r"([^\s\"'`]+)[\"'`]?\s+$")
 MCP_PROTOCOL = "2025-06-18"
 MCP_ELICIT_METHOD = "elicitation/create"
 # no one reads a card and answers it faster than this: a quicker non-accept
@@ -136,6 +138,22 @@ def transcript_tool_input(payload, asked, chunk=1 << 20, limit=64 << 20,
     return None
 
 
+def names_another(engine, before):
+    """The question names another pythia tool's `approve` (pythia-mongo's
+    card, pythia for Oracle's `pythia approve`): its own hook answers it.
+    Every engine's hook runs on every question, and a word from the wrong
+    one — "no pending preview carries that token" — contradicts the right
+    one. A question that names no tool is still answered: the agent learns
+    from it why its own words cannot count."""
+    m = NAMED_BEFORE.search(before.splitlines()[-1] if before.strip() else "")
+    if not m:
+        return False
+    word = re.split(r"[\\/]", m.group(1))[-1].lower()
+    word = re.sub(r"\.(exe|py)$", "", word)
+    return word.startswith("pythia") and word not in (
+        engine.command.lower(), harness.module_of(engine).lower())
+
+
 def hook_approve(engine, state, payload):
     """The chat door's verdict on one AskUserQuestion result: the PostToolUse
     output to print, or None. Silent for every question that names no token:
@@ -155,7 +173,7 @@ def hook_approve(engine, state, payload):
     notes, seen = [], set()
     for question in list(answers) + [q for q in asked if q not in answers]:
         m = TOKEN_IN_QUESTION.search(str(question))
-        if not m:
+        if not m or names_another(engine, str(question)[:m.start()]):
             continue
         token = m.group(1).lower()
         if token in seen:

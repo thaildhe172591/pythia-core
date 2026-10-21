@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.13.0.dev0 — unreleased
+
+Phase 6 of the plan in DESIGN.md: several engines in one project. The
+field test installed pythia for Oracle, pythia-pg, pythia-mssql and
+pythia-mongo into one project; what it found is fixed here.
+
+- **An answer hook leaves another tool's card alone.** Every engine's
+  AskUserQuestion hook runs on every question. Approving pythia-mongo's card
+  also drew "No pending preview carries token ..." from pythia-pg and
+  pythia-mssql — beside pythia-mongo's "approved" — and their next-door
+  advice on a Reject or no answer. A question that names another pythia
+  tool's `approve` is now left to that tool. No grant was ever minted for
+  the wrong engine; the agent was told contradictory things.
+- **A SQL-sounding MCP tool is denied without being claimed.** pythia-pg's
+  and pythia-mssql's guards both read any MCP tool whose name says SQL, and
+  both told the agent to write through their own `apply`. Such a tool is
+  still denied a write, and the reason now says the guard cannot tell which
+  database it reaches. A tool an engine names as its database's
+  (`mcp_tool_pattern`) is denied in that database's name, not as "a SQL
+  tool".
+- **An install replaces its hooks where they stood.** Re-installing one
+  engine moved its hooks after every other engine's, so a second run
+  rewrote `.claude/settings.local.json` and said "updated". It now changes
+  nothing, in any order.
+- **`tests/test_family.py`** (two fake engines beside pythia for Oracle's
+  block and hooks) runs with every suite, and CI's new `family` job
+  installs pythia for Oracle and the three real engines into one project
+  and runs `tests/family_check.py`.
+
 ## 0.12.0.dev0 — unreleased
 
 Phase 5c of the plan in DESIGN.md: what MongoDB's harness needed from the

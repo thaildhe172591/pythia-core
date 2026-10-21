@@ -98,9 +98,14 @@ python tests/test_doors.py
 python tests/test_release.py
 python tests/test_lease.py
 python tests/test_lint.py
+python tests/test_family.py     # several engines in one project, with two fakes
 ```
 
-CI runs them on Ubuntu, Windows and macOS, Python 3.9 and 3.13.
+CI runs them on Ubuntu, Windows and macOS, Python 3.9 and 3.13. Its
+`family` job also installs pythia for Oracle and the three engines into one
+project and runs `tests/family_check.py`: every install keeps the others'
+hooks and blocks, a second run changes nothing, each doctor passes, each
+guard and answer hook acts for its own engine only.
 
 ## License
 
