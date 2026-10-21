@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.1 — unreleased
+
+Phase 8 of the plan in DESIGN.md: the minimum versions, settled by a CI run
+on every version.
+
+- **`floor_warning(conn)`**, an optional engine method in no tier: None, or
+  why the server is older than any version the engine is tested on.
+  `check` prints it as a `!` line, and `--json` carries it as
+  `below_floor`; nothing is refused.
+- **DESIGN settles** the minimum versions (PostgreSQL 14, SQL Server 2017,
+  MongoDB 7.0) and keeps `plpgsql_check` optional and detected.
+
 ## 0.1.0 — 2026-10-21
 
 The first release, and the first on PyPI: alpha. Everything in the

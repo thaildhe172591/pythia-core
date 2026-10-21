@@ -134,6 +134,9 @@ HARNESS = (
 #                             database's tools that write by name alone
 #                             (MongoDB's insert-many, drop-collection)
 #   rollback_notes            {group: whether rollback is real}, for `policy`
+#   floor_warning(conn)       None, or why this server is older than any
+#                             version the engine is tested on: `check` says
+#                             it, and nothing is refused
 
 RELEASE = (
     # Settled in Phase 3c: what deploy needs beyond the write tier.

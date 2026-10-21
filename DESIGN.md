@@ -1,6 +1,6 @@
 # The pythia family — design
 
-Status: **0.1.0, the first release** (October 2026). This document is the
+Status: **0.1.1** (October 2026). This document is the
 plan; the code in this repository is every phase of it so far.
 pythia-postgres, pythia-mssql and pythia-mongo run on all of it, and run
 side by side in one project. Where the two disagree, the
@@ -125,7 +125,11 @@ list; this section explains it.
 **Connect tier**, needed by every command that opens a session:
 `driver_errors`, `connect`, `session(handle, readonly)`, `close`,
 `connect_failure`, `schema_of`, `target_of`, `server_version`,
-`current_schema`.
+`current_schema`. One optional method, in no tier (Phase 8):
+`floor_warning(conn)` — None, or why the server is older than any version
+the engine is tested on. `check` prints it as a `!` line (and as
+`below_floor` under `--json`); nothing is refused, since an older server
+often still works and the developer decides.
 
 **Read tier** (settled in Phase 1): `object_names`, `source`, `columns`,
 `ddl`, `grep`, `dependencies`, `dependents`, `compile_errors`. Names arrive as
@@ -456,6 +460,7 @@ against a real database (a disposable container, never a shared one).
 | 5c · MongoDB harness · done | the MCP hooks (`mcp_tool_pattern`, `mcp_write_tool_pattern`); an MCP tool's input read as a document too, keys included; a script read inside a quoted command (`bash -c '...'`); a predicted write's report says it was read back | harness (`mongosh`, `mongo`, `mongoimport`, `mongorestore`, `mongofiles`, MongoDB's MCP tools by name), release (a data release: one command document or a JSON array of them per file) and lint tiers (seven rules over validators, indexes and updates), the `pythia-mongo-*` skills | as Phase 3, for MongoDB: `install` field-tested, and a release, a lint finding and a lease write on a real server |
 | 6 · several engines in one project · done | an answer hook leaves another tool's card alone; a SQL-sounding MCP tool is denied without being claimed; an install replaces its hooks where they stood; `test_family.py` and the `family` CI job | — | pythia for Oracle and the three engines install into one project in any order, a second run changes nothing, each doctor passes, and each guard and answer hook acts for its own engine only |
 | 7 · first release · done | version 0.1.0; `release.yml` (the tag checked against the version and the changelog, then trusted publishing); README.vi.md held to README.md by a test; PyPI metadata | the same, for each engine; engines ask for `pythia-core>=0.1.0,<0.2` | each repository's tag publishes it to PyPI, core first, and `pip install pythia-postgres` (or `-mssql`, `-mongo`) from PyPI installs a working command |
+| 8 · minimum versions · done | `floor_warning` (optional, in no tier): `check` says when the server is older than the engine's floor, and refuses nothing | the live check on PostgreSQL 14 to 18, SQL Server 2017 to 2025 and MongoDB 7.0 and 8.0; each engine's floor (14, 2017, 7.0) read from the server's own version number | every version CI runs passes the whole live check, and `check` warns below each floor |
 
 Not planned: moving pythia for Oracle onto pythia-core. That would be the
 owner's decision, taken after Phase 3, when there is a core worth moving to.
@@ -479,12 +484,18 @@ Each is asked when its phase starts, not guessed now:
      is 3.9.
    - pyodbc: wheels everywhere, but every machine needs Microsoft's ODBC
      driver installed by hand.
-2. **Minimum versions.** PostgreSQL 13 or 14 (14 brings `BEGIN ATOMIC`
-   dependency tracking and `CREATE OR REPLACE TRIGGER`). SQL Server 2016 SP1
-   or 2019. MongoDB — settled: 7.0 (6.0 is past its end of life); CI tests
-   7.0 and 8.0, each a single-node replica set with authentication.
-3. **`plpgsql_check`.** Optional and detected (the current plan), or
-   required for any write the gate calls "verified"?
+2. **Minimum versions — settled (Phase 8), each by a CI run on every
+   version.** PostgreSQL 14: 14 to 18 pass the whole live check; 13 is past
+   its end of life, and lacks `BEGIN ATOMIC`, whose bodies pg_depend tracks.
+   SQL Server 2017: 2017, 2019, 2022 and 2025 pass; 2016 has no Linux image
+   to test on, and its extended support ended in July 2026. MongoDB 7.0
+   (6.0 is past its end of life); 7.0 and 8.0 pass, each a single-node
+   replica set with authentication. CI keeps every one of these versions;
+   below its floor an engine's `check` warns, and refuses nothing.
+3. **`plpgsql_check` — settled: optional and detected.** With it, a preview
+   checks PL/pgSQL and names what broke; without it, the preview says
+   `NOT VERIFIED` and never calls a change clean. Requiring it would shut
+   pythia-pg out of the managed services that do not offer the extension.
 4. **Publishing — settled: PyPI**, as `pythia-core`, `pythia-postgres`,
    `pythia-mssql` and `pythia-mongo` (all four were free in October 2026).
    A `vX.Y.Z` tag publishes by trusted publishing, as pythia does; the core

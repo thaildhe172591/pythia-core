@@ -12,7 +12,8 @@ build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres
 - per-engine connection resolution;
 - the query-contract lint;
 - the commands every engine's command line inherits:
-  - `version`, `connections` and `check`;
+  - `version`, `connections` and `check` (which says when the server is
+    older than the engine's floor);
   - the read commands `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact`
     and `errors`, windowed and never truncated silently;
   - the write gate: `apply` (snapshot, rehearse inside a transaction and

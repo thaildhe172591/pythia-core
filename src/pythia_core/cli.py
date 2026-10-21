@@ -220,15 +220,21 @@ def cmd_check(engine, conn, ns):
     version = engine.server_version(conn)
     current = engine.current_schema(conn)
     drift = current is not None and current != schema
+    # older than any version the engine is tested on: said, never refused
+    floor = getattr(engine, "floor_warning", None)
+    below = floor(conn) if floor else None
     cols = ("ITEM", "VALUE")
     rows = [("server", version), ("schema", schema),
             ("current_schema", current if current is not None else "")]
     if ns.json:
         print(json_envelope("check", name, schema, cols, rows, False,
-                            engine=engine.name, schema_drift=drift))
+                            engine=engine.name, schema_drift=drift,
+                            below_floor=below))
         return 0
     for item, value in rows:
         print(f"{item:<16} {value}")
+    if below:
+        print(f"\n! {below}")
     if drift:
         print(f"\n! This session's current schema is {current!r}, but connection "
               f"{name!r} is configured for {schema!r}:\n  an unqualified name "

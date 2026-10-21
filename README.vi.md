@@ -12,7 +12,8 @@ Phần của pythia giống nhau ở mọi database. Các engine package xây tr
 - chọn connection riêng cho từng engine;
 - lint cho query contract;
 - các lệnh mà command line của mọi engine đều thừa hưởng:
-  - `version`, `connections` và `check`;
+  - `version`, `connections` và `check` (nói rõ khi server cũ hơn phiên bản
+    tối thiểu của engine);
   - các lệnh đọc `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact` và
     `errors`, có phân trang và không bao giờ cắt bớt mà không báo;
   - cổng ghi: `apply` (snapshot, rehearse trong một transaction rồi

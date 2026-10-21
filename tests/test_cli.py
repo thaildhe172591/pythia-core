@@ -106,6 +106,31 @@ def test_check_says_where_unqualified_names_land():
     assert "did not name a current schema" in out
 
 
+def test_check_warns_below_the_engines_floor_and_refuses_nothing():
+    # an engine may say its server is older than any version it is tested
+    # on (floor_warning, in no tier): check says so, and nothing is refused
+    class OldServer(FakeEngine):
+        def floor_warning(self, conn):
+            return "FakeDB 0.9 is below pythia-fake's floor, 1.0: it is not tested there."
+    with project(DEV):
+        code, out, _ = run(OldServer(), "check")
+    assert code == 0 and "! FakeDB 0.9 is below pythia-fake's floor, 1.0" in out
+    with project(DEV):
+        code, out, _ = run(OldServer(), "check", "--json")
+    assert code == 0 and json.loads(out)["below_floor"].startswith("FakeDB 0.9")
+
+    class Current(FakeEngine):
+        def floor_warning(self, conn):
+            return None
+    for e in (Current(), FakeEngine()):             # at the floor, or no floor at all
+        with project(DEV):
+            code, out, _ = run(e, "check", "--json")
+        assert code == 0 and json.loads(out)["below_floor"] is None
+        with project(DEV):
+            _, out, _ = run(e, "check")
+        assert "floor" not in out
+
+
 def test_check_refuses_an_engine_without_the_tier_before_connecting():
     class NoVersion(FakeEngine):
         server_version = None

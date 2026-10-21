@@ -3,4 +3,4 @@
 Engine packages (pythia-postgres first) build on it; see DESIGN.md. pythia
 for Oracle is a separate, self-contained tool and does not use this package.
 """
-__version__ = "0.1.0"     # kept equal to pyproject.toml (tests/test_core.py)
+__version__ = "0.1.1"     # kept equal to pyproject.toml (tests/test_core.py)
