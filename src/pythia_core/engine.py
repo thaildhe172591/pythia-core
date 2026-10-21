@@ -23,7 +23,9 @@ IDENTITY = (
     "command",      # the console script: "pythia-pg"
     "env_prefix",   # "PYTHIA_PG" -> PYTHIA_PG_CONFIG, PYTHIA_PG_CONNECTION
     "version",      # the engine package's own version
-    "bind_style",   # "named" (:s) or "pyformat" (%(s)s) — see queries.py
+    "bind_style",   # "named" (:s) or "pyformat" (%(s)s) — see queries.py —
+                    #    or "document": {"$bind": "s"} values in a command
+                    #    document, for a database that takes no SQL
 )
 
 CONNECT = (
@@ -50,7 +52,8 @@ READ = (
     "source",           # (conn, schema, name) -> rows (unit, line, text);
                         #    [] when there is none
     "columns",          # (conn, schema, name) -> (cols, rows), None if no such
-                        #    table or view
+                        #    table or view; (cols, rows, blind_spot) when the
+                        #    columns are inferred and the answer is partial
     "ddl",              # (conn, schema, name) -> text, '' if none
     "grep",             # (conn, schema, text, fetch) -> (cols, rows): each
                         #    source line holding text, at most `fetch` rows
@@ -125,7 +128,7 @@ LINT = (
 TIERS = {"connect": CONNECT, "read": READ, "write": WRITE, "harness": HARNESS,
          "release": RELEASE, "lint": LINT}
 
-BIND_STYLES = ("named", "pyformat")
+BIND_STYLES = ("named", "pyformat", "document")
 
 
 def missing(engine, tier):

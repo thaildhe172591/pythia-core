@@ -1,9 +1,9 @@
 # The pythia family — design
 
-Status: **Phase 4 is complete** (October 2026); Phase 5 is next. This
-document is the plan; the code in this repository is its first nine steps,
-and pythia-postgres and pythia-mssql each run on all of it. Where the two disagree, the code is what
-runs and this document is wrong — fix it in the same change.
+Status: **Phase 5a** (October 2026). This document is the plan; the code in
+this repository is its first ten steps. pythia-postgres and pythia-mssql run
+on all of it, and pythia-mongo has begun on it. Where the two disagree, the
+code is what runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
 
@@ -313,16 +313,17 @@ does this for PostgreSQL.
 | Code that lives in the database | packages, procedures, functions, triggers, types, views | functions, procedures (11+), triggers, views, materialized views | procedures, functions, triggers, views | none worth managing: server-side JavaScript is deprecated. What is managed is validators, indexes and views (pipelines) |
 | Current source (the snapshot) | `ALL_SOURCE` | `pg_get_functiondef`, `pg_get_viewdef`, `pg_get_triggerdef` | `sys.sql_modules` / `OBJECT_DEFINITION` (NULL `WITH ENCRYPTION`: refuse) | `listCollections` options (validator, `viewOn`, `pipeline`), `listIndexes` |
 | Replace in place | `CREATE OR REPLACE` | `CREATE OR REPLACE`. A changed signature creates a second overload and leaves the old one; a changed return type needs a DROP | `CREATE OR ALTER` (2016 SP1+) | `collMod` for validators and views. On an index `collMod` changes only TTL and `hidden`; anything else is drop and create |
-| Who depends on it | `ALL_DEPENDENCIES` (+ PL/Scope) | `pg_depend` / `pg_rewrite` for views and SQL-standard bodies (`BEGIN ATOMIC`, 14+). PL/pgSQL bodies are not tracked: text search plus `plpgsql_check`, and the gap is named | `sys.sql_expression_dependencies`; dynamic SQL and deferred names are blind spots | view pipelines (`viewOn`, `$lookup`, `$unionWith`); application code is invisible, and the report says so |
-| "Broken" after a write | `INVALID` status, `ALL_ERRORS` | no status. Syntax is checked at CREATE; semantics only by `plpgsql_check` when installed, or at run time | no status. `sys.dm_sql_referenced_entities` binds a module now and raises what is missing (207, or 2020 with the missing names in `sys.sql_expression_dependencies`) without ending the open transaction. `sp_refreshsqlmodule` is not usable inside a rehearsal: when it fails it rolls back the caller's whole transaction | after a validator change: count documents the new validator rejects |
+| Who depends on it | `ALL_DEPENDENCIES` (+ PL/Scope) | `pg_depend` / `pg_rewrite` for views and SQL-standard bodies (`BEGIN ATOMIC`, 14+). PL/pgSQL bodies are not tracked: text search plus `plpgsql_check`, and the gap is named | `sys.sql_expression_dependencies`; dynamic SQL and deferred names are blind spots | views only: `viewOn` and every collection a pipeline reads (`$lookup`, `$graphLookup`, `$unionWith`, `$facet`, nested pipelines). Application code, other databases, `$merge`/`$out` jobs and change streams are invisible, and every report says so |
+| "Broken" after a write | `INVALID` status, `ALL_ERRORS` | no status. Syntax is checked at CREATE; semantics only by `plpgsql_check` when installed, or at run time | no status. `sys.dm_sql_referenced_entities` binds a module now and raises what is missing (207, or 2020 with the missing names in `sys.sql_expression_dependencies`) without ending the open transaction. `sp_refreshsqlmodule` is not usable inside a rehearsal: when it fails it rolls back the caller's whole transaction | no status. `errors` counts the documents each validator rejects as it stands (with `$nor`), and runs each view over its first documents; after a validator change, the same count, before and after |
 | DDL inside a transaction | no (implicit commit) | yes, except a few (`CREATE INDEX CONCURRENTLY`, `VACUUM`, `CREATE DATABASE`, ...) | yes, except a few (`ALTER DATABASE`, full-text, ...) | no for `collMod` and indexes |
 | A trigger can end the caller's transaction | no: a trigger cannot commit (an autonomous-transaction trigger commits only its own work) | no: a trigger cannot `COMMIT` | yes: a trigger's `COMMIT` or `ROLLBACK` ends it (error 3609). pythia-mssql rehearses one transaction level down, so a single `COMMIT` commits nothing; a transaction that ended anyway is `escaped` (exit 3) unless the database's triggers show it was rolled back | not applicable |
-| Read-only session | `SET TRANSACTION READ ONLY` | `default_transaction_read_only` (psycopg `read_only`). `dblink`/FDW reach past it | none (`SET TRANSACTION READ ONLY` is a syntax error): a least-privilege login (`db_datareader`, `VIEW DEFINITION`) is the line, and a read command's transaction is never committed | none: a user holding only the `read` role |
+| Read-only session | `SET TRANSACTION READ ONLY` | `default_transaction_read_only` (psycopg `read_only`). `dblink`/FDW reach past it | none (`SET TRANSACTION READ ONLY` is a syntax error): a least-privilege login (`db_datareader`, `VIEW DEFINITION`) is the line, and a read command's transaction is never committed | none: a user holding only the `read` role is the line, and every command a read sends is a file the suite holds to reads only |
 | Row-set check before DML | count + `ORA_HASH` fingerprint | count + order-independent aggregate of `md5(row::text)` | count + `CHECKSUM_AGG(BINARY_CHECKSUM(*))` | `countDocuments` + fingerprint of matched `_id`s |
 | Plan without running | `EXPLAIN PLAN` + `DBMS_XPLAN` | `EXPLAIN` without `ANALYZE` (`ANALYZE` executes: refused) | `SET SHOWPLAN_XML ON` | `explain("queryPlanner")` (`executionStats` executes: refused) |
 | Script splitting | `;` and `/`, q-quotes, SQL*Plus directives refused | `;`, dollar quotes `$tag$`, `E''` strings; psql meta-commands (`\i`, `\gexec`) refused | `GO` separator (a client construct, not T-SQL); `CREATE PROCEDURE` must open its batch | one command document per file (Extended JSON). JavaScript is refused, as pythia refuses anonymous PL/SQL blocks |
 | Comments on objects | `COMMENT ON` | `COMMENT ON` (`obj_description`, `col_description`) | extended property `MS_Description` | none: a `$jsonSchema` `description` |
 | Raw clients the guard denies | `sqlplus`, `sql`, SQLcl MCP `run-sql` | `psql` (and `pg_restore` into a database) | `sqlcmd`, `osql`, `isql`, `mssql-cli`, `Invoke-Sqlcmd`; `bcp ... in`; `sqlpackage` Publish and Import. A procedure first in a batch needs no `EXEC`, so any `sp_`/`xp_` name counts as a write | `mongosh`, `mongo`, `mongoimport`, `mongorestore` |
+| The tool's own statements | `queries/`, one file each | `queries/*.sql`, pyformat binds | `queries/*.sql`, pyformat binds (`%%` adapted for pymssql) | `commands/*.json`: a command document, each bind a `{"$bind": ...}` value |
 | Identifier case | unquoted folds to upper | unquoted folds to lower | per collation (usually case-insensitive) | case-sensitive |
 | "Schema" | user / schema | schema (inside a database); the default is `public` | schema (`dbo` by default) | database |
 
@@ -396,7 +397,9 @@ against a real database (a disposable container, never a shared one).
 | 4a · SQL Server reads · done | — | pythia-mssql: the driver spike (§8), connect and read tiers, `errors` through `sys.dm_sql_referenced_entities`, tables rebuilt by `ddl`; CI against SQL Server 2022 in a service container | every read command passes against a fixture on a real server as a least-privilege login, and `ddl` rebuilds what it describes |
 | 4b · SQL Server writes · done | `escaped`: a rehearsal whose transaction ended inside the statement is never called unwritten — exit 3, the approval spent, a lease paused; previews name only the doors an engine has | the write tier: a T-SQL reader (`N''`, `[ ]`, nested comments, `GO`), classification, the rehearsal verified by binding modules before and after and run one transaction level down (a trigger's `COMMIT` commits nothing), rows revalidated by `CHECKSUM_AGG` | as Phase 2, for SQL Server — and a trigger that commits past the rehearsal is reported as written, on a real server |
 | 4c · SQL Server harness · done | — | harness (`sqlcmd`, `osql`, `Invoke-Sqlcmd`, `bcp in`, `sqlpackage` Publish), release (`GO` batches, a module's body to the end of its batch) and lint tiers (ten T-SQL rules), the `pythia-mssql-*` skills | as Phase 3, for SQL Server: `install` field-tested, and a release, a lint error and a lease write on a real server |
-| 5 · MongoDB | groups that fit documents (validator, index, view, data) | pythia-mongo: command-document classification, validator verify by counting rejected documents | as Phase 1–3, for MongoDB |
+| **5a · MongoDB reads (now)** | `cols` may name a blind spot (columns inferred from a sample); the `document` bind style | pythia-mongo: pymongo, every command a reviewable file (`commands/`), connect and read tiers — `cols` from a sample, `impact` through view pipelines, `errors` as the documents a validator rejects and views that fail; CI against MongoDB 7.0 and 8.0 replica sets | every read command passes against a fixture on a real server as a `read`-role user, and `ddl` rebuilds what it describes |
+| 5b · MongoDB writes | a second write path for what cannot be rehearsed: predicted before approval, written, verified after — exit 3 when the result differs from the prediction | data rehearsed in a transaction (a replica set is required); validators, indexes and views predicted (the documents a validator would reject, the duplicates a unique index would meet, a view's first documents); snapshot and restore | as Phase 2, for MongoDB, with every prediction checked against what the write did |
+| 5c · MongoDB harness | — | `mongosh`, `mongoimport`, `mongorestore` guard patterns, validator and index lint rules, the `pythia-mongo-*` skills | as Phase 3, for MongoDB |
 
 Not planned: moving pythia for Oracle onto pythia-core. That would be the
 owner's decision, taken after Phase 3, when there is a core worth moving to.
@@ -422,7 +425,8 @@ Each is asked when its phase starts, not guessed now:
      driver installed by hand.
 2. **Minimum versions.** PostgreSQL 13 or 14 (14 brings `BEGIN ATOMIC`
    dependency tracking and `CREATE OR REPLACE TRIGGER`). SQL Server 2016 SP1
-   or 2019. MongoDB 6 or 7.
+   or 2019. MongoDB — settled: 7.0 (6.0 is past its end of life); CI tests
+   7.0 and 8.0, each a single-node replica set with authentication.
 3. **`plpgsql_check`.** Optional and detected (the current plan), or
    required for any write the gate calls "verified"?
 4. **Publishing.** Whether `pythia-core` and the engine names are free on

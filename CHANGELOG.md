@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.0.dev0 — unreleased
+
+Phase 5a of the plan in DESIGN.md: what MongoDB's reads needed from the core.
+
+- **`cols` may say its answer is partial.** An engine that infers columns —
+  MongoDB reads them from a sample of documents — returns `(cols, rows,
+  blind_spot)`; `cols` prints `-- blind spot: ...`, and its JSON carries
+  `verified` and `blind_spot`.
+- **The `document` bind style**, for an engine whose statements are command
+  documents with `{"$bind": ...}` values.
+- README.md names every engine; DESIGN.md marks Phase 5 begun (5a now, then
+  5b and 5c), settles MongoDB 7.0 as the floor, and fills in MongoDB's
+  column where 5a learned it.
+
 ## 0.9.0.dev0 — unreleased
 
 Phase 4b of the plan in DESIGN.md: what SQL Server's writes needed from the

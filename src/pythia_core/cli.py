@@ -262,8 +262,15 @@ def cmd_cols(engine, conn, ns):
     found = engine.columns(conn, ns.schema, ns.name)
     if found is None:
         sys.exit(f"No table or view named {ns.name!r} in schema {ns.schema}.")
-    cols, rows = found
+    # an engine that infers the columns (from sampled documents, say) says
+    # what the answer could not see
+    cols, rows, blind = (tuple(found) + (None,))[:3]
+    if ns.json:
+        emit_table(ns, cols, rows, False, verified=blind is None, blind_spot=blind)
+        return 0
     emit_table(ns, cols, rows, False)
+    if blind is not None:
+        print(f"-- blind spot: {blind}")
     return 0
 
 

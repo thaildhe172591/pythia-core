@@ -112,6 +112,9 @@ class FakeReadEngine(FakeEngine):
         return list(self.SOURCE) if name == "f_total" else []
 
     def columns(self, conn, schema, name):
+        if name == "c_order":          # a collection: fields read from a sample
+            return ("FIELD", "TYPE"), [("_id", "objectId")], \
+                "fields come from 100 sampled documents of 2000"
         if name != "t_order":
             return None
         return ("COLUMN", "TYPE"), [("id", "integer"), ("total", "numeric")]

@@ -2,10 +2,11 @@
 
 The part of pythia that is the same for every database. Engine packages
 build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres),
-[pythia-mssql](https://github.com/thaildhe172591/pythia-mssql) (pre-alpha:
-reads), then MongoDB.
+[pythia-mssql](https://github.com/thaildhe172591/pythia-mssql) and
+[pythia-mongo](https://github.com/thaildhe172591/pythia-mongo) (pre-alpha:
+reads).
 
-**Pre-alpha (Phase 3e).** What is here today:
+**Pre-alpha (Phase 5a).** What is here today:
 - the engine contract and its conformance check;
 - per-engine connection resolution;
 - the query-contract lint;
@@ -60,8 +61,9 @@ class PostgresEngine:
     env_prefix, version, bind_style = "PYTHIA_PG", "0.1.0.dev0", "pyformat"
     # ...the connect tier: driver_errors, connect, session, close,
     # connect_failure, schema_of, target_of, server_version, current_schema
-    # ...the read tier: object_names, source, columns, ddl, grep,
-    # dependencies, dependents, compile_errors
+    # ...the read tier: object_names, source, columns (which may name a
+    # blind spot, when its columns are inferred), ddl, grep, dependencies,
+    # dependents, compile_errors
     # ...and the write tier: classify, prepare_statement, parse_object,
     # destructive_reason, dml_probe, measure_row_set, snapshot, rehearse,
     # restore_statement, privilege_warning

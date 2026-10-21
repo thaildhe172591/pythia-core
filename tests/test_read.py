@@ -173,6 +173,20 @@ def test_src_windows_source_lines_and_says_how_to_continue():
                 "no source found for 'nope' in schema app")
 
 
+def test_cols_says_when_its_answer_is_partial():
+    # an engine that infers columns (MongoDB samples documents) says so
+    _, out, _ = run(FakeReadEngine(), "cols", "c_order")
+    assert out.splitlines() == ["FIELD\tTYPE", "_id\tobjectId",
+                                "-- blind spot: fields come from 100 sampled documents of 2000"], out
+    _, out, _ = run(FakeReadEngine(), "cols", "c_order", "--json")
+    doc = json.loads(out)
+    assert doc["blind_spot"] == "fields come from 100 sampled documents of 2000"
+    assert doc["verified"] is False
+    _, out, _ = run(FakeReadEngine(), "cols", "t_order", "--json")
+    doc = json.loads(out)
+    assert doc["blind_spot"] is None and doc["verified"] is True
+
+
 def test_cols_and_ddl_refuse_what_is_not_there():
     _, out, _ = run(FakeReadEngine(), "cols", "t_order")
     assert out.splitlines()[:2] == ["COLUMN\tTYPE", "id\tinteger"]

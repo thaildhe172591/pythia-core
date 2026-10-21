@@ -86,6 +86,11 @@ def test_engine_problems_reports_identity_and_gaps():
     empty = engine.engine_problems(object())
     assert "name is not declared" in empty
 
+    class Documents:          # MongoDB: binds are values inside a command document
+        name, label, command = "mongo", "MongoDB", "pythia-mongo"
+        env_prefix, version, bind_style = "PYTHIA_MONGO", "1", "document"
+    assert not any("bind_style" in m for m in engine.engine_problems(Documents()))
+
 
 # --- query contract ----------------------------------------------------------
 
