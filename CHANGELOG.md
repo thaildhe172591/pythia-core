@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.1.1 — unreleased
+## 0.1.1 — 2026-10-21
 
-Phase 8 of the plan in DESIGN.md: the minimum versions, settled by a CI run
-on every version.
+Phase 8 of the plan in DESIGN.md — the minimum versions, settled by a CI
+run on every version — and Phase 9, pythia-mysql, whose 0.1.0 is released
+beside it and asks for this version.
 
 - **`floor_warning(conn)`**, an optional engine method in no tier: None, or
   why the server is older than any version the engine is tested on.
