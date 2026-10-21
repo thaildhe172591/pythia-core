@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.11.0.dev0 — unreleased
+
+Phase 5b of the plan in DESIGN.md: a second write path, for what cannot be
+rehearsed.
+
+- **The predict tier: `execute`, `verify_written`.** An engine's
+  `rehearse` may return `predicted: True` — nothing ran. The preview and
+  the card say "predicted — nothing ran"; after the approval and the same
+  checks (token, grant, a prediction that moved), core runs the statement
+  once and asks the engine what landed. A refusal wrote nothing and keeps
+  the approval; a write that may have landed is `WRITTEN?` (exit 3); a
+  result unlike the prediction is reported and exits 3 with the restore,
+  and pauses an autopilot lease. The journal keeps `verified_after`.
+- **`deploy` refuses a predicted statement** before anything is written:
+  all or nothing needs one transaction.
+- **An engine that predicts without the predict tier is refused** before
+  its preview.
+- Adversarial tests in `test_gate.py`, `test_release.py`, `test_lease.py`,
+  mutation-checked.
+
 ## 0.10.0.dev0 — unreleased
 
 Phase 5a of the plan in DESIGN.md: what MongoDB's reads needed from the core.

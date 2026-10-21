@@ -99,6 +99,21 @@ WRITE = (
                         #    do far more than the task needs, else None
 )
 
+PREDICT = (
+    # Settled in Phase 5, for statements an engine cannot rehearse (MongoDB's
+    # validators, indexes and views run outside any transaction). rehearse
+    # returns {"predicted": True, ...}: nothing ran, the findings are a
+    # prediction from the data as it stands. After approval, core runs it
+    # once and asks what landed (gate.py).
+    "execute",          # (conn, schema, group, stmt, ident) -> {} when it ran;
+                        #    {"error"} when the database refused it whole and
+                        #    nothing was written; {"escaped", "error"} when it
+                        #    cannot say whether it landed
+    "verify_written",   # (conn, schema, group, stmt, ident, outcome) ->
+                        #    {broken, own_errors, differs}: what the write left,
+                        #    and every way it differs from the prediction
+)
+
 HARNESS = (
     # Settled in Phase 3: what the hooks and `install` need (harness.py).
     "raw_client_pattern",   # () -> regex naming the engine's own clients
@@ -125,8 +140,8 @@ LINT = (
     "lint_rules",       # () -> [rule]
 )
 
-TIERS = {"connect": CONNECT, "read": READ, "write": WRITE, "harness": HARNESS,
-         "release": RELEASE, "lint": LINT}
+TIERS = {"connect": CONNECT, "read": READ, "write": WRITE, "predict": PREDICT,
+         "harness": HARNESS, "release": RELEASE, "lint": LINT}
 
 BIND_STYLES = ("named", "pyformat", "document")
 

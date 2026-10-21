@@ -15,7 +15,8 @@ reads).
   - the read commands `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact`
     and `errors`, windowed and never truncated silently;
   - the write gate: `apply` (snapshot, rehearse inside a transaction and
-    roll back, preview), `approve` (the developer: at a console, or from
+    roll back — or, for what cannot be rehearsed, predict, then write once
+    and check what landed — preview), `approve` (the developer: at a console, or from
     chat through AskUserQuestion and `approve --hook`, or the MCP approver
     `mcp`),
     `apply --confirm` (commits only what was approved), `policy`,
@@ -67,6 +68,8 @@ class PostgresEngine:
     # ...and the write tier: classify, prepare_statement, parse_object,
     # destructive_reason, dml_probe, measure_row_set, snapshot, rehearse,
     # restore_statement, privilege_warning
+    # ...the predict tier, for statements that cannot be rehearsed:
+    # execute, verify_written
     # ...the harness tier: raw_client_pattern, write_sql_pattern,
     # script_pattern, connections_template, skills_dir
     # ...the release tier: split_script

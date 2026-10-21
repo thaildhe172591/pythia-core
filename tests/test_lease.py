@@ -13,7 +13,7 @@ import os
 import sys
 
 import fakes  # noqa: F401 — puts src/ on sys.path
-from fakes import FakeHarnessEngine
+from fakes import FakeHarnessEngine, FakePredictEngine
 from test_gate import NEW, OLD, expect, project
 
 from pythia_core import doors, harness, human, journal, lease  # noqa: E402
@@ -207,6 +207,17 @@ def test_a_write_that_escaped_the_transaction_pauses_the_lease():
         rec = lease.read(p.state)
         assert lease.status(rec) == "paused"
         assert "escaped" in lease.line(rec)
+
+
+def test_a_predicted_write_lands_under_a_lease_and_a_surprise_pauses_it():
+    e = FakePredictEngine()
+    with project(e) as p:
+        grant_lease(p)
+        code, out, _ = p.run("apply", p.file(NEW))
+        assert code == 0 and e.conn.executed == [NEW] and "Landed under" in out
+        e.conn.differs = ["the view fails on 2 documents the prediction did not see"]
+        code, out, _ = p.run("apply", p.file(OLD))
+        assert code == 3 and lease.status(lease.read(p.state)) == "paused"
 
 
 def test_an_unapproved_or_forged_lease_file_lands_nothing():

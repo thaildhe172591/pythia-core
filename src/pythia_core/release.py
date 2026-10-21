@@ -171,6 +171,13 @@ def run_members(engine, conn, ns, statements, then, batch=None):
             undo = gate.mark_escape(engine, state, eid, st["group"], ident, snap,
                                     outcome, name)
             raise Escaped(st["n"], where, outcome, members, undo)
+        if outcome.get("predicted"):
+            why = (f"{where}: it cannot be rehearsed — {engine.label} runs it "
+                   "outside any transaction — so it has no place in a release "
+                   "that lands all or nothing. Apply it on its own: "
+                   f"{engine.command} apply <file>")
+            journal.update_entry(state, eid, refused=True, error=why)
+            return members, why
         if outcome.get("error"):
             journal.update_entry(state, eid, refused=True, error=outcome["error"])
             return members, f"{where}: {outcome['error']}"

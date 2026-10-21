@@ -165,6 +165,27 @@ The policy groups are `source`, `comments`, `data_dml`, `structural`,
 `grants` and `session`, with pythia's defaults. `allow` is accepted only for
 `session`: a write that needs no approval is a write no person saw.
 
+**Predict tier** (settled in Phase 5b): `execute`, `verify_written`. Some
+statements cannot be rehearsed: MongoDB runs a validator, index or view
+change outside any transaction. For those, `rehearse` returns
+`predicted: True` — nothing ran, and its findings are a prediction from the
+data as it stands (the documents a new validator would reject, the
+duplicates a unique index would meet, a view's first documents). The six
+steps keep their order and their checks; only two change:
+
+- **Preview** says "predicted — nothing ran", on the card too, and that the
+  prediction is checked again after the write.
+- **Commit** runs the statement once, through `execute`, after the token,
+  the grant and the moved-prediction check. A database that refused it
+  whole wrote nothing, and the approval stays unspent; one that cannot say
+  whether it landed is reported `WRITTEN?` (exit 3). Then `verify_written`
+  reads what landed: anything broken, and every way it differs from the
+  approved prediction, is reported, and exits 3 with the restore.
+
+A predicted statement has no place in a release: all or nothing needs one
+transaction, so `deploy` refuses it before anything is written. An engine
+that predicts without the tier is refused before its preview.
+
 **Harness tier** (settled in Phase 3a): `raw_client_pattern`,
 `write_sql_pattern`, `script_pattern`, `connections_template`,
 `skills_dir`. Core turns them into four commands that touch no database

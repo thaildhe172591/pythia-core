@@ -13,7 +13,7 @@ import re
 import sys
 
 import fakes  # noqa: F401 — puts src/ on sys.path
-from fakes import FakeHarnessEngine
+from fakes import FakeHarnessEngine, FakePredictEngine
 from test_gate import OLD, expect, project
 
 from pythia_core import doors, grants, harness, human, journal, release  # noqa: E402
@@ -215,6 +215,19 @@ def test_a_member_that_escaped_the_transaction_takes_the_release_with_it():
         doc = json.loads(out.strip().splitlines()[-1])
         assert code == 3 and doc["ok"] is False and doc["escaped"]["n"] == 2
         assert len(doc["restore"]) == 2
+
+
+def test_a_statement_that_can_only_be_predicted_has_no_place_in_a_release():
+    # all or nothing needs one transaction; a predicted write runs outside it
+    e = FakePredictEngine()
+    e.conn.objects["f_total()"] = OLD
+    e.conn.rows["t_order"] = [1, 2, 3, 4]
+    with project(e) as p:
+        names = scripts(p, ("rel.sql", [COMMENT, FN]))
+        expect(p.run("deploy", *names), 1, "statement 2", "cannot be rehearsed",
+               "apply it on its own")
+        assert e.conn.executed == [] and e.conn.commits == 0
+        assert e.conn.pending == [] and "t_order" not in e.conn.comments
 
 
 def test_an_approved_breakage_lands_and_exits_3():

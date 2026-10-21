@@ -158,6 +158,10 @@ class WriteConn(FakeConn):
         self.rowcount = None       # a rowcount that differs from the probe
         self.on_execute = None     # hook run as a rehearsal executes
         self.escape = None         # a trigger that commits: the next rehearsal escapes
+        self.predicted = []        # every statement a prediction read (nothing ran)
+        self.executed = []         # every statement the predict path ran for real
+        self.execute_result = None  # {"error"} or {"escaped"} the next execute returns
+        self.differs = []          # what verify_written finds unlike the prediction
 
     def commit(self):
         self.commits += 1
@@ -350,3 +354,42 @@ class FakeHarnessEngine(FakeWriteEngine):
 
     def skills_dir(self):
         return ROOT / "tests" / "fixtures" / "skills"
+
+
+class FakePredictEngine(FakeHarnessEngine):
+    """An engine that cannot rehearse its source statements (MongoDB's views
+    and validators run outside any transaction): it predicts them, core runs
+    each once after approval, and the engine checks what landed."""
+
+    def rehearse(self, conn, schema, group, stmt, ident, snapshot):
+        if group != "source":
+            return super().rehearse(conn, schema, group, stmt, ident, snapshot)
+        conn.predicted.append(stmt)
+        if conn.fail:
+            return {"predicted": True, "error": conn.fail}
+        label = next(iter(snapshot), f"{ident['name']}()")
+        return {"predicted": True, "error": None, "object": label, "type": "FUNCTION",
+                "after": stmt, "rows": None, "broken": list(conn.broken_after),
+                "own_errors": list(conn.own_after), "verified": True, "blind": None,
+                "notes": ["predicted from the data as it stands"]}
+
+    def execute(self, conn, schema, group, stmt, ident):
+        conn.executed.append(stmt)
+        if conn.execute_result:
+            return dict(conn.execute_result)
+        label = next((k for k in conn.objects if k.split("(")[0] == ident["name"]),
+                     f"{ident['name']}()")
+        conn.objects[label] = stmt         # outside any transaction: it lands now
+        return {}
+
+    def verify_written(self, conn, schema, group, stmt, ident, outcome):
+        return {"broken": list(outcome.get("broken") or []),
+                "own_errors": list(outcome.get("own_errors") or []),
+                "differs": list(conn.differs)}
+
+
+class NoPredictTier(FakePredictEngine):
+    """Predicts, but cannot run what it predicted: the gate must refuse."""
+    execute = None
+    verify_written = None
+

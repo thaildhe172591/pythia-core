@@ -14,6 +14,12 @@ transaction (PostgreSQL, SQL Server).
 
 A refusal is exit 1 and touches nothing it does not have to: a denied group
 is refused before any read; an approval is checked before anything runs.
+
+A statement the engine cannot rehearse — MongoDB runs a validator, index or
+view change outside any transaction — is PREDICTED in step 3 instead:
+nothing runs, and the preview says so. Step 5 then runs it once, after the
+approval and the same checks, and the engine reports what landed; anything
+unlike the prediction is reported, and exits 3 (the predict tier).
 """
 import difflib
 import hashlib
@@ -250,6 +256,14 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
 
     # 3. REHEARSE — inside a transaction; rolled back unless this run writes
     outcome = engine.rehearse(conn, schema, group, stmt, ident, snap)
+    predicted = bool(outcome.get("predicted"))
+    if predicted and missing(engine, "predict"):
+        conn.rollback()
+        journal.update_entry(state, eid, refused=True, error="no predict tier")
+        sys.exit(f"Refused: {engine.label} predicted this statement instead of "
+                 "rehearsing it, but the engine has no predict tier ("
+                 f"{', '.join(missing(engine, 'predict'))}) to run it once and "
+                 "check what landed. Nothing was written.")
     if outcome.get("escaped"):
         return report_escape(engine, conn, ns, eid, group, ident, snap, outcome,
                              name, confirm)
@@ -262,7 +276,8 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
             sys.exit(f"FAILED — nothing was written.\n  {outcome['error']}\nThe "
                      "approval is unspent: fix the cause and retry the same "
                      "command, or fix the file and preview again.")
-        sys.exit(f"Rehearsal failed — {engine.label} refused the statement, so "
+        what = "Prediction" if predicted else "Rehearsal"
+        sys.exit(f"{what} failed — {engine.label} would refuse the statement, so "
                  f"there is nothing to approve. Nothing was written.\n"
                  f"  {outcome['error']}")
     if not writing:
@@ -280,7 +295,10 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
                  "broken": _findings(outcome.get("broken")),
                  "own_errors": _findings(outcome.get("own_errors")),
                  "rows": outcome.get("rows"),
-                 "notes": list(outcome.get("notes") or [])}
+                 "notes": list(outcome.get("notes") or []),
+                 "predicted": predicted}
+    if predicted:
+        rehearsal["notes"].append(PREDICTED_NOTE)
     after = outcome.get("after") or stmt
     journal.update_entry(state, eid, before=before if ident else "", after=after,
                          restore=restore, object=obj, type=otype, token=token,
@@ -304,8 +322,11 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
         seen = {tuple(b) for b in (approved.get("rehearsal") or {}).get("broken", [])}
         moved = [b for b in rehearsal["broken"] if tuple(b) not in seen]
         if moved:
-            refuse("Rolled back: the verification moved since the approved "
-                   "preview — these break now and did not then:\n"
+            refuse(("Refused: the prediction moved since the approved preview — "
+                    if predicted else
+                    "Rolled back: the verification moved since the approved "
+                    "preview — ")
+                   + "these break now and did not then:\n"
                    + "\n".join(f"  {b[0]} ({b[1]}): {b[2]}" for b in moved)
                    + f"\nNothing was written. Preview again:\n  {then}")
     if row_set is not None and writing and rehearsal["rows"] != row_set["count"]:
@@ -342,16 +363,41 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
                 print(f"  {ln}")
         return 0
 
-    # 5. COMMIT
+    # 5. COMMIT — a predicted statement runs now, once, outside any transaction
+    if predicted:
+        done = engine.execute(conn, schema, group, stmt, ident) or {}
+        if done.get("escaped"):
+            return report_escape(engine, conn, ns, eid, group, ident, snap,
+                                 {**outcome, **done}, name, confirm)
+        if done.get("error"):
+            conn.rollback()
+            journal.update_entry(state, eid, refused=True, error=done["error"])
+            if via == "autopilot":
+                lease.note_write(state, False, entry=eid, written=False)
+            sys.exit(f"FAILED — {engine.label} refused it, and nothing was "
+                     f"written.\n  {done['error']}\nThe approval is unspent: fix "
+                     "the cause and retry the same command, or fix the file and "
+                     "preview again.")
     conn.commit()
     if via == "grant":
         grants.spend(state, confirm)
     journal.update_entry(state, eid, applied=True, confirmed_via=via)
+    differs = []
+    if predicted:
+        found = engine.verify_written(conn, schema, group, stmt, ident, outcome) or {}
+        rehearsal["broken"] = _findings(found.get("broken", rehearsal["broken"]))
+        rehearsal["own_errors"] = _findings(found.get("own_errors",
+                                                      rehearsal["own_errors"]))
+        differs = [str(d) for d in found.get("differs") or []]
+        journal.update_entry(state, eid, verified_after={
+            "broken": rehearsal["broken"], "own_errors": rehearsal["own_errors"],
+            "differs": differs})
 
     # 6. REPORT
     broken, own = rehearsal["broken"], rehearsal["own_errors"]
-    ok = not broken and not own
-    after_lease = (lease.note_write(state, ok, len(broken) + len(own), eid)
+    ok = not broken and not own and not differs
+    after_lease = (lease.note_write(state, ok, len(broken) + len(own) + len(differs),
+                                    eid)
                    if via == "autopilot" else None)
     if after_lease and not ns.json:
         print(f"\n  Landed under the developer's autopilot lease — "
@@ -365,16 +411,22 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
                           "blind_spot": rehearsal["blind"], "restore": undo,
                           "restore_is_drop": created,
                           "restore_blocked_by_policy": drop_denied,
+                          "predicted": predicted, "differs": differs,
                           "confirmed_via": via, "exit": 0 if ok else 3}))
         return 0 if ok else 3
     if ok and group == "data_dml":
         print(f"\n  Applied — {rehearsal['rows']} rows changed and committed.")
     elif ok:
         print(f"\n  Applied {obj} ({otype}).")
-    else:
+    elif own or broken:
         print(f"\n  Applied {obj} ({otype}) — but it is broken:")
         for name_, type_, msg in own + broken:
             print(f"    {name_} ({type_}): {msg}")
+    if differs:
+        print(f"\n  Applied {obj} ({otype}) — but what landed differs from the "
+              "prediction the developer approved:")
+        for d in differs:
+            print(f"    {d}")
     if ok and not rehearsal["verified"]:
         print(f"  NOT VERIFIED: {rehearsal['blind']}")
     if undo is None:
@@ -498,7 +550,9 @@ def _print_preview(group, obj, otype, schema, created, changed, summary,
             print(f"  {ln.lstrip('- ')}")
         for note in blind_impact or []:
             print(f"  blind spot: {note}")
-    if rehearsal["broken"] or rehearsal["own_errors"]:
+    if rehearsal.get("predicted"):
+        _print_prediction(rehearsal)
+    elif rehearsal["broken"] or rehearsal["own_errors"]:
         print("\n  ! rehearsed — ran and rolled back, and this would break:")
         for name_, type_, msg in rehearsal["own_errors"] + rehearsal["broken"]:
             print(f"    {name_} ({type_}): {msg}")
@@ -530,6 +584,36 @@ def _print_preview(group, obj, otype, schema, created, changed, summary,
         for ln in diff_text.splitlines():
             print(f"  {ln}")
     print(f"\n  Snapshot saved: {entry_path}")
+
+
+PREDICTED_NOTE = ("nothing ran: this is a prediction from the data as it "
+                  "stands. It is checked again after the write; if what lands "
+                  "differs, the report says so and exits 3")
+
+
+def _print_prediction(rehearsal):
+    if rehearsal["broken"] or rehearsal["own_errors"]:
+        print("\n  ! predicted — nothing ran, and this would break:")
+        for name_, type_, msg in rehearsal["own_errors"] + rehearsal["broken"]:
+            print(f"    {name_} ({type_}): {msg}")
+    elif rehearsal["verified"]:
+        print("\n  predicted — nothing ran: nothing would break")
+    else:
+        print(f"\n  predicted — nothing ran, NOT VERIFIED: {rehearsal['blind']}")
+
+
+def _card_verdict(reh):
+    what = "Predicted (nothing ran)" if reh.get("predicted") else "Rehearsed"
+    if reh.get("broken") or reh.get("own_errors"):
+        return (f"{what}: this BREAKS — "
+                + "; ".join(f"{b[0]}: {b[2]}" for b in
+                            reh.get("own_errors", []) + reh.get("broken", [])))
+    if reh.get("predicted"):
+        return (f"{what}; nothing would break." if reh.get("verified") else
+                f"{what}, NOT VERIFIED — {reh.get('blind')}")
+    if reh.get("verified"):
+        return "Rehearsed: ran and rolled back; nothing broke."
+    return f"Rehearsed: ran and rolled back, NOT VERIFIED — {reh.get('blind')}"
 
 
 # --- the developer's half -----------------------------------------------------
@@ -572,14 +656,7 @@ def approval_card(engine, state, token):
         if meta.get("row_set"):
             lines.append("")
             lines += render_row_set(meta["row_set"])
-    if reh.get("broken") or reh.get("own_errors"):
-        lines.append("Rehearsed: this BREAKS — "
-                     + "; ".join(f"{b[0]}: {b[2]}" for b in
-                                 reh.get("own_errors", []) + reh.get("broken", [])))
-    elif reh.get("verified"):
-        lines.append("Rehearsed: ran and rolled back; nothing broke.")
-    else:
-        lines.append(f"Rehearsed: ran and rolled back, NOT VERIFIED — {reh.get('blind')}")
+    lines.append(_card_verdict(reh))
     if meta.get("destructive"):
         lines.append(f"! DESTRUCTIVE: {meta['destructive']}.")
     lines += lint_card_lines(meta.get("lint") or [])

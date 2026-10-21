@@ -22,7 +22,7 @@ import sys
 import tempfile
 
 import fakes  # noqa: F401 — puts src/ on sys.path
-from fakes import FakeWriteEngine
+from fakes import FakePredictEngine, FakeWriteEngine, NoPredictTier
 
 from pythia_core import cli, grants, human, journal  # noqa: E402
 
@@ -280,6 +280,112 @@ def test_a_statement_that_escaped_the_transaction_is_never_called_unwritten():
         code, out, _ = p.run("apply", "change.sql", "--confirm", token)
         assert code == 3 and "WRITTEN?" in out
         assert grants.read(p.state, token)["used_at"]
+
+
+# --- a statement that cannot be rehearsed: predicted, written once, checked after ---
+
+def test_a_prediction_runs_nothing_and_says_so():
+    e = FakePredictEngine()
+    e.conn.objects["f_total()"] = OLD
+    with project(e) as p:
+        code, out, why = p.run("apply", p.file(NEW))
+        assert code == 0, why
+        assert e.conn.predicted == [NEW] and e.conn.executed == []
+        assert e.conn.objects["f_total()"] == OLD
+        assert "predicted — nothing ran" in out and "ran and rolled back" not in out
+        assert "checked again after the write" in out
+        doc = p.preview(NEW)
+        assert doc["rehearsal"]["predicted"] is True and e.conn.executed == []
+        code, card, _ = p.run("approve", "--card", doc["token"])
+        assert code == 0 and "Predicted (nothing ran)" in card and "rolled back" not in card
+        e.conn.broken_after = [("v_report", "VIEW", "would read what does not exist")]
+        code, out, _ = p.run("apply", "change.sql")
+        assert "! predicted — nothing ran, and this would break:" in out
+
+
+def test_a_predicted_write_runs_once_and_only_after_approval():
+    e = FakePredictEngine()
+    e.conn.objects["f_total()"] = OLD
+    with project(e) as p:
+        token = p.preview(NEW)["token"]
+        expect(p.run("apply", "change.sql", "--confirm", token), 1,
+               "no developer approval is on file")
+        assert e.conn.executed == []
+        p.approve(token)
+        code, out, why = p.run("apply", "change.sql", "--confirm", token)
+        assert code == 0, why
+        assert e.conn.executed == [NEW] and e.conn.objects["f_total()"] == NEW
+        assert grants.read(p.state, token)["used_at"] and "journal restore" in out
+        meta = journal.read_entry(p.state, p.entries()[0])["meta"]
+        assert meta["applied"] and meta["rehearsal"]["predicted"] is True
+        assert meta["verified_after"] == {"broken": [], "own_errors": [], "differs": []}
+        expect(p.run("apply", "change.sql", "--confirm", token), 1)
+        assert e.conn.executed == [NEW]                  # one approval, one write
+
+
+def test_a_prediction_that_moved_since_approval_writes_nothing():
+    e = FakePredictEngine()
+    with project(e) as p:
+        token = p.preview(NEW)["token"]
+        p.approve(token)
+        e.conn.broken_after = [("v_report", "VIEW", "3 documents fail the new validator")]
+        expect(p.run("apply", "change.sql", "--confirm", token), 1, "moved",
+               "v_report", "nothing was written")
+        assert e.conn.executed == []
+        assert grants.read(p.state, token)["used_at"] is None
+
+
+def test_a_refused_execute_wrote_nothing_and_keeps_the_approval():
+    e = FakePredictEngine()
+    with project(e) as p:
+        token = p.preview(NEW)["token"]
+        p.approve(token)
+        e.conn.execute_result = {"error": "11000: duplicate key error"}
+        expect(p.run("apply", "change.sql", "--confirm", token), 1, "FAILED",
+               "duplicate key", "nothing was written", "unspent")
+        assert grants.read(p.state, token)["used_at"] is None
+        meta = journal.read_entry(p.state, p.entries()[0])["meta"]
+        assert meta["refused"] and not meta.get("applied")
+
+
+def test_an_execute_that_may_have_landed_is_never_called_unwritten():
+    e = FakePredictEngine()
+    with project(e) as p:
+        token = p.preview(NEW)["token"]
+        p.approve(token)
+        e.conn.execute_result = {"escaped": "the connection dropped during the write",
+                                 "error": "connection reset"}
+        code, out, why = p.run("apply", "change.sql", "--confirm", token)
+        assert code == 3 and "WRITTEN?" in out and "connection dropped" in out, (code, why)
+        assert "nothing was written" not in (out + why).lower()
+        assert grants.read(p.state, token)["used_at"]
+
+
+def test_what_landed_is_checked_against_the_prediction():
+    e = FakePredictEngine()
+    e.conn.objects["f_total()"] = OLD
+    with project(e) as p:
+        token = p.preview(NEW)["token"]
+        p.approve(token)
+        e.conn.differs = ["3 documents fail the validator now; the prediction said 0"]
+        code, out, _ = p.run("apply", "change.sql", "--confirm", token)
+        assert code == 3 and "differs from the prediction" in out, out
+        assert "the prediction said 0" in out and "journal restore" in out
+        meta = journal.read_entry(p.state, p.entries()[0])["meta"]
+        assert meta["verified_after"]["differs"] == e.conn.differs
+        e.conn.differs = []
+        token = p.preview(OLD)["token"]
+        p.approve(token)
+        code, out, _ = p.run("apply", "change.sql", "--confirm", token, "--json")
+        doc = json.loads(out.strip().splitlines()[-1])
+        assert code == 0 and doc["ok"] and doc["differs"] == []
+
+
+def test_an_engine_that_predicts_needs_the_predict_tier():
+    e = NoPredictTier()
+    with project(e) as p:
+        expect(p.run("apply", p.file(NEW)), 1, "predict tier", "execute")
+        assert e.conn.executed == [] and e.conn.commits == 0
 
 
 def test_dml_revalidates_the_rows_and_the_rowcount():
