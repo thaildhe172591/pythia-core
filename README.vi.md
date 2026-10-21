@@ -5,9 +5,11 @@
 Phần của pythia giống nhau ở mọi database. Các engine package xây trên nó:
 [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres),
 [pythia-mssql](https://github.com/thaildhe172591/pythia-mssql) và
-[pythia-mongo](https://github.com/thaildhe172591/pythia-mongo).
+[pythia-mongo](https://github.com/thaildhe172591/pythia-mongo);
+[pythia-mysql](https://github.com/thaildhe172591/pythia-mysql) đang được xây
+(Phase 9).
 
-**Alpha (0.1.0).** Những gì đã có:
+**Alpha (0.1.1).** Những gì đã có:
 - engine contract và bộ kiểm tra tuân thủ của nó;
 - chọn connection riêng cho từng engine;
 - lint cho query contract;

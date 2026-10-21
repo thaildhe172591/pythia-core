@@ -5,9 +5,11 @@
 The part of pythia that is the same for every database. Engine packages
 build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres),
 [pythia-mssql](https://github.com/thaildhe172591/pythia-mssql) and
-[pythia-mongo](https://github.com/thaildhe172591/pythia-mongo).
+[pythia-mongo](https://github.com/thaildhe172591/pythia-mongo);
+[pythia-mysql](https://github.com/thaildhe172591/pythia-mysql) is being built
+(Phase 9).
 
-**Alpha (0.1.0).** What is here today:
+**Alpha (0.1.1).** What is here today:
 - the engine contract and its conformance check;
 - per-engine connection resolution;
 - the query-contract lint;

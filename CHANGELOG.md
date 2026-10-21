@@ -11,6 +11,9 @@ on every version.
   `below_floor`; nothing is refused.
 - **DESIGN settles** the minimum versions (PostgreSQL 14, SQL Server 2017,
   MongoDB 7.0) and keeps `plpgsql_check` optional and detected.
+- **DESIGN plans Phase 9, pythia-mysql**, and settles its question: PyMySQL,
+  MySQL 8.4 LTS as the floor, DDL predicted (it commits implicitly) and data
+  rehearsed. The engine needs nothing new from the core.
 
 ## 0.1.0 — 2026-10-21
 

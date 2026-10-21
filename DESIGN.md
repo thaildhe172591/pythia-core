@@ -3,7 +3,8 @@
 Status: **0.1.1** (October 2026). This document is the
 plan; the code in this repository is every phase of it so far.
 pythia-postgres, pythia-mssql and pythia-mongo run on all of it, and run
-side by side in one project. Where the two disagree, the
+side by side in one project; pythia-mysql is being built on it (Phase 9).
+Where the two disagree, the
 code is what runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
@@ -16,7 +17,8 @@ gate snapshots before writing, refuses what it cannot classify, needs a
 person's approval, verifies after, and says "written but broken" (exit 3)
 instead of "done".
 
-The family takes the same idea to PostgreSQL, SQL Server and MongoDB.
+The family takes the same idea to PostgreSQL, SQL Server, MongoDB and
+MySQL.
 
 **pythia for Oracle is not touched.** It stays in its own repository, under
 its own name (`pythia-plsql` on PyPI, command `pythia`), self-contained, with
@@ -32,8 +34,10 @@ learns that these packages exist.
 | pythia-postgres | `pythia-postgres` | `pythia_postgres` | `pythia-pg` | psycopg 3 (`psycopg[binary]`) | `.pythia/postgres/` |
 | pythia-mssql | `pythia-mssql` | `pythia_mssql` | `pythia-mssql` | pymssql (settled in Phase 4, §8) | `.pythia/mssql/` |
 | pythia-mongo | `pythia-mongo` | `pythia_mongo` | `pythia-mongo` | pymongo | `.pythia/mongo/` |
+| pythia-mysql | `pythia-mysql` | `pythia_mysql` | `pythia-mysql` | PyMySQL (settled in Phase 9, §8) | `.pythia/mysql/` |
 
-None is on PyPI yet; install from git (each README says how).
+pythia-core and the first three engines are on PyPI (§8, question 4);
+pythia-mysql installs from git until its first release.
 
 ## 2. Living next to pythia for Oracle
 
@@ -97,11 +101,11 @@ engine.** Everything else is core.
 | Core (pythia-core) | Engine (pythia-<engine>) |
 |---|---|
 | connection resolution, the state folder, secret-free listing | driver, connect, read-only session, connect-error hints |
-| output contract: JSON envelope, truncation markers, exit codes 0/1/3 | identifier folding (Oracle upper, PostgreSQL lower, SQL Server per collation, MongoDB none) |
+| output contract: JSON envelope, truncation markers, exit codes 0/1/3 | identifier folding (Oracle upper, PostgreSQL lower, SQL Server per collation, MongoDB none, MySQL as `lower_case_table_names` says) |
 | the query contract lint (`queries/`, headers, declared binds) | the queries themselves, and their bind style |
 | policy groups, approval tokens, grants, the approval doors | statement classification into those groups |
 | the journal, the six apply steps, restore as a write | snapshot (what "the current source" is), restore rendering |
-| deploy batching, autopilot leases | script splitting (`/` + q-quotes, `$$`, `GO`, one document per file) |
+| deploy batching, autopilot leases | script splitting (`/` + q-quotes, `$$`, `GO`, one document per file, `DELIMITER`) |
 | hook framework, MCP approver, install, doctor framework | the raw clients the guard denies, doctor's database checks |
 | lint framework (severities, conventions file) | lint rules |
 | skill lint, routing-table checks | the skills' content |
@@ -366,24 +370,24 @@ does this for PostgreSQL.
 
 ## 5. Each concept, per database
 
-| Concept | Oracle (pythia) | PostgreSQL | SQL Server | MongoDB |
-|---|---|---|---|---|
-| Code that lives in the database | packages, procedures, functions, triggers, types, views | functions, procedures (11+), triggers, views, materialized views | procedures, functions, triggers, views | none worth managing: server-side JavaScript is deprecated. What is managed is validators, indexes and views (pipelines) |
-| Current source (the snapshot) | `ALL_SOURCE` | `pg_get_functiondef`, `pg_get_viewdef`, `pg_get_triggerdef` | `sys.sql_modules` / `OBJECT_DEFINITION` (NULL `WITH ENCRYPTION`: refuse) | `listCollections` options (validator, `viewOn`, `pipeline`), `listIndexes` |
-| Replace in place | `CREATE OR REPLACE` | `CREATE OR REPLACE`. A changed signature creates a second overload and leaves the old one; a changed return type needs a DROP | `CREATE OR ALTER` (2016 SP1+) | `collMod` for validators and views. On an index `collMod` changes only TTL and `hidden`; anything else is drop and create |
-| Who depends on it | `ALL_DEPENDENCIES` (+ PL/Scope) | `pg_depend` / `pg_rewrite` for views and SQL-standard bodies (`BEGIN ATOMIC`, 14+). PL/pgSQL bodies are not tracked: text search plus `plpgsql_check`, and the gap is named | `sys.sql_expression_dependencies`; dynamic SQL and deferred names are blind spots | views only: `viewOn` and every collection a pipeline reads (`$lookup`, `$graphLookup`, `$unionWith`, `$facet`, nested pipelines). Application code, other databases, `$merge`/`$out` jobs and change streams are invisible, and every report says so |
-| "Broken" after a write | `INVALID` status, `ALL_ERRORS` | no status. Syntax is checked at CREATE; semantics only by `plpgsql_check` when installed, or at run time | no status. `sys.dm_sql_referenced_entities` binds a module now and raises what is missing (207, or 2020 with the missing names in `sys.sql_expression_dependencies`) without ending the open transaction. `sp_refreshsqlmodule` is not usable inside a rehearsal: when it fails it rolls back the caller's whole transaction | no status. `errors` counts the documents each validator rejects as it stands (with `$nor`), and runs each view over its first documents; after a validator change, the same count, before and after |
-| DDL inside a transaction | no (implicit commit) | yes, except a few (`CREATE INDEX CONCURRENTLY`, `VACUUM`, `CREATE DATABASE`, ...) | yes, except a few (`ALTER DATABASE`, full-text, ...) | no for `collMod` and indexes |
-| A trigger can end the caller's transaction | no: a trigger cannot commit (an autonomous-transaction trigger commits only its own work) | no: a trigger cannot `COMMIT` | yes: a trigger's `COMMIT` or `ROLLBACK` ends it (error 3609). pythia-mssql rehearses one transaction level down, so a single `COMMIT` commits nothing; a transaction that ended anyway is `escaped` (exit 3) unless the database's triggers show it was rolled back | not applicable |
-| Read-only session | `SET TRANSACTION READ ONLY` | `default_transaction_read_only` (psycopg `read_only`). `dblink`/FDW reach past it | none (`SET TRANSACTION READ ONLY` is a syntax error): a least-privilege login (`db_datareader`, `VIEW DEFINITION`) is the line, and a read command's transaction is never committed | none: a user holding only the `read` role is the line, and every command a read sends is a file the suite holds to reads only |
-| Row-set check before DML | count + `ORA_HASH` fingerprint | count + order-independent aggregate of `md5(row::text)` | count + `CHECKSUM_AGG(BINARY_CHECKSUM(*))` | `countDocuments` + fingerprint of matched `_id`s |
-| Plan without running | `EXPLAIN PLAN` + `DBMS_XPLAN` | `EXPLAIN` without `ANALYZE` (`ANALYZE` executes: refused) | `SET SHOWPLAN_XML ON` | `explain("queryPlanner")` (`executionStats` executes: refused) |
-| Script splitting | `;` and `/`, q-quotes, SQL*Plus directives refused | `;`, dollar quotes `$tag$`, `E''` strings; psql meta-commands (`\i`, `\gexec`) refused | `GO` separator (a client construct, not T-SQL); `CREATE PROCEDURE` must open its batch | one command document per file (Extended JSON). JavaScript is refused, as pythia refuses anonymous PL/SQL blocks |
-| Comments on objects | `COMMENT ON` | `COMMENT ON` (`obj_description`, `col_description`) | extended property `MS_Description` | none: a `$jsonSchema` `description` |
-| Raw clients the guard denies | `sqlplus`, `sql`, SQLcl MCP `run-sql` | `psql` (and `pg_restore` into a database) | `sqlcmd`, `osql`, `isql`, `mssql-cli`, `Invoke-Sqlcmd`; `bcp ... in`; `sqlpackage` Publish and Import. A procedure first in a batch needs no `EXEC`, so any `sp_`/`xp_` name counts as a write | `mongosh` and `mongo` given a write method, `$out`, `$merge`, `load()` or a script; `mongoimport`, `mongorestore`, `mongofiles`; an MCP tool named for a write (`insert-many`, `drop-collection`) or given a writing command document |
-| The tool's own statements | `queries/`, one file each | `queries/*.sql`, pyformat binds | `queries/*.sql`, pyformat binds (`%%` adapted for pymssql) | `commands/*.json`: a command document, each bind a `{"$bind": ...}` value |
-| Identifier case | unquoted folds to upper | unquoted folds to lower | per collation (usually case-insensitive) | case-sensitive |
-| "Schema" | user / schema | schema (inside a database); the default is `public` | schema (`dbo` by default) | database |
+| Concept | Oracle (pythia) | PostgreSQL | SQL Server | MongoDB | MySQL |
+|---|---|---|---|---|---|
+| Code that lives in the database | packages, procedures, functions, triggers, types, views | functions, procedures (11+), triggers, views, materialized views | procedures, functions, triggers, views | none worth managing: server-side JavaScript is deprecated. What is managed is validators, indexes and views (pipelines) | procedures, functions, triggers, events, views |
+| Current source (the snapshot) | `ALL_SOURCE` | `pg_get_functiondef`, `pg_get_viewdef`, `pg_get_triggerdef` | `sys.sql_modules` / `OBJECT_DEFINITION` (NULL `WITH ENCRYPTION`: refuse) | `listCollections` options (validator, `viewOn`, `pipeline`), `listIndexes` | information_schema (`ROUTINES`, `VIEWS`, `TRIGGERS`, `EVENTS`): the body as written, the CREATE header rebuilt (a view's SELECT only as MySQL rewrote it); `SHOW CREATE` is the reference. A body is NULL to an account without `SHOW_ROUTINE` that did not define it |
+| Replace in place | `CREATE OR REPLACE` | `CREATE OR REPLACE`. A changed signature creates a second overload and leaves the old one; a changed return type needs a DROP | `CREATE OR ALTER` (2016 SP1+) | `collMod` for validators and views. On an index `collMod` changes only TTL and `hidden`; anything else is drop and create | `CREATE OR REPLACE VIEW` only. A procedure, function or trigger is dropped and created (`ALTER PROCEDURE` changes characteristics, never the body); `ALTER EVENT ... DO` replaces an event's body |
+| Who depends on it | `ALL_DEPENDENCIES` (+ PL/Scope) | `pg_depend` / `pg_rewrite` for views and SQL-standard bodies (`BEGIN ATOMIC`, 14+). PL/pgSQL bodies are not tracked: text search plus `plpgsql_check`, and the gap is named | `sys.sql_expression_dependencies`; dynamic SQL and deferred names are blind spots | views only: `viewOn` and every collection a pipeline reads (`$lookup`, `$graphLookup`, `$unionWith`, `$facet`, nested pipelines). Application code, other databases, `$merge`/`$out` jobs and change streams are invisible, and every report says so | `VIEW_TABLE_USAGE` and `VIEW_ROUTINE_USAGE` (views), triggers, foreign keys. Procedure, function, trigger and event bodies are recorded nowhere: text search in every schema, and the gap is named. What the account may not see (no `SHOW_ROUTINE`, `TRIGGER`, `EVENT`) is read from `SHOW GRANTS` and named |
+| "Broken" after a write | `INVALID` status, `ALL_ERRORS` | no status. Syntax is checked at CREATE; semantics only by `plpgsql_check` when installed, or at run time | no status. `sys.dm_sql_referenced_entities` binds a module now and raises what is missing (207, or 2020 with the missing names in `sys.sql_expression_dependencies`) without ending the open transaction. `sp_refreshsqlmodule` is not usable inside a rehearsal: when it fails it rolls back the caller's whole transaction | no status. `errors` counts the documents each validator rejects as it stands (with `$nor`), and runs each view over its first documents; after a validator change, the same count, before and after | a view is marked invalid when what it reads goes (information_schema shows error 1356). A routine, trigger or event resolves names only when it runs: never verified, and said |
+| DDL inside a transaction | no (implicit commit) | yes, except a few (`CREATE INDEX CONCURRENTLY`, `VACUUM`, `CREATE DATABASE`, ...) | yes, except a few (`ALTER DATABASE`, full-text, ...) | no for `collMod` and indexes | no: every DDL statement commits implicitly, pending DML included. DDL is predicted, written once, then read back; data is rehearsed in a transaction (Phase 9b) |
+| A trigger can end the caller's transaction | no: a trigger cannot commit (an autonomous-transaction trigger commits only its own work) | no: a trigger cannot `COMMIT` | yes: a trigger's `COMMIT` or `ROLLBACK` ends it (error 3609). pythia-mssql rehearses one transaction level down, so a single `COMMIT` commits nothing; a transaction that ended anyway is `escaped` (exit 3) unless the database's triggers show it was rolled back | not applicable | no: a trigger cannot `COMMIT` |
+| Read-only session | `SET TRANSACTION READ ONLY` | `default_transaction_read_only` (psycopg `read_only`). `dblink`/FDW reach past it | none (`SET TRANSACTION READ ONLY` is a syntax error): a least-privilege login (`db_datareader`, `VIEW DEFINITION`) is the line, and a read command's transaction is never committed | none: a user holding only the `read` role is the line, and every command a read sends is a file the suite holds to reads only | `SET SESSION TRANSACTION READ ONLY`: MySQL refuses DML and DDL alike (1792), the implicit transaction after a commit included |
+| Row-set check before DML | count + `ORA_HASH` fingerprint | count + order-independent aggregate of `md5(row::text)` | count + `CHECKSUM_AGG(BINARY_CHECKSUM(*))` | `countDocuments` + fingerprint of matched `_id`s | count + `BIT_XOR(CRC32(CONCAT_WS(...)))` (Phase 9b) |
+| Plan without running | `EXPLAIN PLAN` + `DBMS_XPLAN` | `EXPLAIN` without `ANALYZE` (`ANALYZE` executes: refused) | `SET SHOWPLAN_XML ON` | `explain("queryPlanner")` (`executionStats` executes: refused) | `EXPLAIN` (`EXPLAIN ANALYZE` executes: refused) |
+| Script splitting | `;` and `/`, q-quotes, SQL*Plus directives refused | `;`, dollar quotes `$tag$`, `E''` strings; psql meta-commands (`\i`, `\gexec`) refused | `GO` separator (a client construct, not T-SQL); `CREATE PROCEDURE` must open its batch | one command document per file (Extended JSON). JavaScript is refused, as pythia refuses anonymous PL/SQL blocks | `;`, and `DELIMITER` (a client construct) around bodies that hold `;`, as the mysql client and Flyway read them (Phase 9c) |
+| Comments on objects | `COMMENT ON` | `COMMENT ON` (`obj_description`, `col_description`) | extended property `MS_Description` | none: a `$jsonSchema` `description` | `COMMENT` clauses on tables, columns, indexes, routines and events; none on views |
+| Raw clients the guard denies | `sqlplus`, `sql`, SQLcl MCP `run-sql` | `psql` (and `pg_restore` into a database) | `sqlcmd`, `osql`, `isql`, `mssql-cli`, `Invoke-Sqlcmd`; `bcp ... in`; `sqlpackage` Publish and Import. A procedure first in a batch needs no `EXEC`, so any `sp_`/`xp_` name counts as a write | `mongosh` and `mongo` given a write method, `$out`, `$merge`, `load()` or a script; `mongoimport`, `mongorestore`, `mongofiles`; an MCP tool named for a write (`insert-many`, `drop-collection`) or given a writing command document | `mysql`, `mysqlsh`, `mysqlimport`, a dump fed to a client (Phase 9c) |
+| The tool's own statements | `queries/`, one file each | `queries/*.sql`, pyformat binds | `queries/*.sql`, pyformat binds (`%%` adapted for pymssql) | `commands/*.json`: a command document, each bind a `{"$bind": ...}` value | `queries/*.sql`, pyformat binds (PyMySQL formats with `%`), the same under any `sql_mode` |
+| Identifier case | unquoted folds to upper | unquoted folds to lower | per collation (usually case-insensitive) | case-sensitive | table and schema names as `lower_case_table_names` says (case-sensitive on Linux by default); routine and column names case-insensitive |
+| "Schema" | user / schema | schema (inside a database); the default is `public` | schema (`dbo` by default) | database | database |
 
 ### What PostgreSQL makes stronger than Oracle
 
@@ -461,6 +465,9 @@ against a real database (a disposable container, never a shared one).
 | 6 · several engines in one project · done | an answer hook leaves another tool's card alone; a SQL-sounding MCP tool is denied without being claimed; an install replaces its hooks where they stood; `test_family.py` and the `family` CI job | — | pythia for Oracle and the three engines install into one project in any order, a second run changes nothing, each doctor passes, and each guard and answer hook acts for its own engine only |
 | 7 · first release · done | version 0.1.0; `release.yml` (the tag checked against the version and the changelog, then trusted publishing); README.vi.md held to README.md by a test; PyPI metadata | the same, for each engine; engines ask for `pythia-core>=0.1.0,<0.2` | each repository's tag publishes it to PyPI, core first, and `pip install pythia-postgres` (or `-mssql`, `-mongo`) from PyPI installs a working command |
 | 8 · minimum versions · done | `floor_warning` (optional, in no tier): `check` says when the server is older than the engine's floor, and refuses nothing | the live check on PostgreSQL 14 to 18, SQL Server 2017 to 2025 and MongoDB 7.0 and 8.0; each engine's floor (14, 2017, 7.0) read from the server's own version number | every version CI runs passes the whole live check, and `check` warns below each floor |
+| 9a · MySQL reads | — | pythia-mysql: the driver spike (§8), connect and read tiers — read sessions `READ ONLY`; `impact` through view usage, triggers and foreign keys, then routine, trigger and event bodies by name; what the account cannot see read from `SHOW GRANTS` and named; `errors` as the views MySQL marked invalid; `src` and `ddl` rebuilt; CI against MySQL 8.4, 9.4 and 9.5 | every read command passes against a fixture on a real server as a least-privilege account, with and without `TRIGGER` and `EVENT`, and every `ddl` runs into a copy that matches its original |
+| 9b · MySQL writes | — (the predict tier of Phase 5b) | data rehearsed in a transaction, rows checked by count and `BIT_XOR(CRC32(...))`; DDL predicted — a view's SELECT run with `LIMIT 0`, the views above a table — then written once and read back (a view MySQL marks invalid after it is exit 3); routines `NOT VERIFIED`; snapshot and restore | as Phase 2, for MySQL, with every prediction checked against what the write did |
+| 9c · MySQL harness | — | harness (`mysql`, `mysqlsh`, `mysqlimport`), release (`DELIMITER`, `BEGIN ... END` bodies) and lint tiers, the `pythia-mysql-*` skills, the `family` job with four engines, release 0.1.0 | as Phase 3, for MySQL |
 
 Not planned: moving pythia for Oracle onto pythia-core. That would be the
 owner's decision, taken after Phase 3, when there is a core worth moving to.
@@ -503,3 +510,24 @@ Each is asked when its phase starts, not guessed now:
 5. **Vietnamese documentation — settled for the README.** Each repository
    ships README.vi.md from 0.1.0, held to README.md's headings and commands
    by a test. pythia's GUIDE has no family counterpart yet.
+6. **MySQL — settled (Phase 9): PyMySQL, MySQL 8.4 LTS, DDL predicted.**
+   The Phase 9 spike, against MySQL 8.4:
+   - PyMySQL 1.2: pure Python, on Python 3.9 and later; pyformat binds,
+     formatted by Python's `%` with a dict, so `%%` arrives as `%` with no
+     adapter; TLS whenever the server offers it. mysql-connector-python and
+     mysqlclient need Python 3.10 (mysqlclient a C library too).
+   - Every DDL statement commits implicitly, pending DML with it, so DDL
+     cannot be rehearsed: it takes Phase 5b's predict path, and data, in an
+     InnoDB transaction, is rehearsed.
+   - `SET SESSION TRANSACTION READ ONLY` refuses DDL as well as DML (1792):
+     the read commands' second line. `START TRANSACTION READ ONLY` alone
+     does not — a `CREATE TABLE` commits it and runs.
+   - information_schema records which tables, views and functions a view
+     reads, and marks a view invalid when one goes; it records nothing a
+     routine, trigger or event body uses. It hides routines, triggers and
+     events from an account without `SHOW_ROUTINE`, `TRIGGER` or `EVENT`,
+     and `SHOW GRANTS` (active roles merged in) says which.
+   - The floor is 8.4 LTS (8.0 reached its end of life in April 2026); CI
+     runs 8.4 and the innovation releases 9.4 and 9.5. MariaDB, whose
+     catalog differs, is a question for a later phase; `check` names it.
+   - `pythia-mysql` was free on PyPI in October 2026.
