@@ -332,6 +332,7 @@ def test_a_predicted_write_runs_once_and_only_after_approval():
         assert code == 0, why
         assert e.conn.executed == [NEW] and e.conn.objects["f_total()"] == NEW
         assert grants.read(p.state, token)["used_at"] and "journal restore" in out
+        assert "read back after the write: as predicted" in out    # the evidence
         meta = journal.read_entry(p.state, p.entries()[0])["meta"]
         assert meta["applied"] and meta["rehearsal"]["predicted"] is True
         assert meta["verified_after"] == {"broken": [], "own_errors": [], "differs": []}

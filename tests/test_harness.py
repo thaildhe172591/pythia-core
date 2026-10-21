@@ -162,8 +162,14 @@ def test_a_client_behind_a_wrapper_is_still_the_client():
                     "docker exec db fakesql -f x.sql", "ssh dbhost fakesql -f x.sql",
                     "echo 'delete from t' | fakesql",
                     "fakesql <<EOF\ndrop table t;\nEOF",
-                    "FAKESQL.EXE -c 'drop table t'"):
+                    "FAKESQL.EXE -c 'drop table t'",
+                    # a script read inside the quoted command a shell is handed
+                    'bash -c "fakesql -f x.sql"', "sh -c 'fakesql < x.sql'",
+                    """ssh db "bash -c 'fakesql --file x.sql'" """,
+                    'docker exec db sh -c "fakesql -f \\"my file.sql\\""'):
             assert verdict(bash(root, cmd)) == "deny", cmd
+        # a quoted string that does not start the client is not read for a script
+        assert verdict(bash(root, 'fakesql -c "select 1 from t where a < b"')) is None
 
 
 def test_only_sql_tools_are_read_for_sql():
@@ -174,6 +180,38 @@ def test_only_sql_tools_are_read_for_sql():
                             statement="delete from t_order")) == "deny"
         assert verdict(tool(root, "mcp__warehouse__run_sql",
                             params={"batch": ["select 1", "drop table t_order"]})) == "deny"
+
+
+def test_an_engine_can_name_its_databases_mcp_tools_and_their_writes():
+    # MongoDB's MCP servers name their tools by action (insert-many,
+    # drop-collection), not by SQL: the engine says which tools are its
+    # database's, and which of those write by their name alone
+    class DocumentEngine(FakeHarnessEngine):
+        def mcp_tool_pattern(self):
+            return r"mongo"
+
+        def mcp_write_tool_pattern(self):
+            return r"^(insert|update|delete|drop|create|rename)"
+
+        def write_sql_pattern(self):     # a command document's own keys
+            return super().write_sql_pattern() + r"""|["']?\bdrop["']?\s*:|\$merge\b"""
+
+    def decide(name, **tool_input):
+        return verdict(harness.pre_tool_decision(DocumentEngine(), {
+            "tool_name": name, "tool_input": tool_input, "cwd": str(root)}))
+    with project() as root:
+        assert decide("mcp__mongodb__insert-many", documents=[]) == "deny"
+        assert decide("mcp__mongodb__drop-collection") == "deny"
+        assert decide("mcp__mongodb__run_command", command={"x": "drop table t"}) == "deny"
+        assert decide("mcp__mongodb__find", filter={"status": "PAID"}) is None
+        # the input is read as the document it is, keys included, not only
+        # for the strings it holds: {"drop": ...} and $merge are keys
+        assert decide("mcp__mongodb__run_command", command={"drop": "t_order"}) == "deny"
+        assert decide("mcp__mongodb__aggregate", pipeline=[{"$merge": "t_copy"}]) == "deny"
+        assert decide("mcp__mongodb__find", filter={"note": "dropped"}) is None
+        assert decide("mcp__github__create_issue", body="drop table t") is None
+        assert decide("mcp__warehouse__run_sql", sql="drop table t") is None   # not its tool
+        assert decide("mcp__pythia_fake__approve", token="abc123") is None
 
 
 def test_an_engine_without_the_harness_tier_is_refused_and_its_hook_is_silent():

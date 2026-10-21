@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.12.0.dev0 — unreleased
+
+Phase 5c of the plan in DESIGN.md: what MongoDB's harness needed from the
+core. Phase 5 is complete.
+
+- **An engine names its database's MCP tools.** Two optional methods, in
+  no tier: `mcp_tool_pattern()` (which MCP tools are its database's —
+  MongoDB's servers take no SQL, and their names say `mongo`, not `sql`)
+  and `mcp_write_tool_pattern()` (which write by their name alone:
+  `insert-many`, `drop-collection`). Without them, nothing changes.
+- **An MCP tool's input is read as the document it is.** The guard read
+  only the strings a tool's input holds; a command document's write is in
+  its keys (`{"drop": ...}`, a `$merge` stage). It now reads the input as
+  JSON too, and a match in either denies.
+- **A script inside a quoted command is seen.** `bash -c "psql -f x.sql"`
+  hands a shell a command whose `-f` the guard never read, because it
+  reads flags with quoted text emptied. A quoted string that itself starts
+  the client is now read the same way, at any depth (`ssh db "bash -c
+  '...'"`).
+- **A predicted write's report says it was read back:** "Applied ... —
+  read back after the write: as predicted.", where it said only "Applied".
+- Adversarial tests in `test_harness.py` and `test_gate.py`,
+  mutation-checked.
+
 ## 0.11.0.dev0 — unreleased
 
 Phase 5b of the plan in DESIGN.md: a second write path, for what cannot be

@@ -1,8 +1,8 @@
 # The pythia family — design
 
-Status: **Phase 5a** (October 2026). This document is the plan; the code in
-this repository is its first ten steps. pythia-postgres and pythia-mssql run
-on all of it, and pythia-mongo has begun on it. Where the two disagree, the
+Status: **Phase 5 complete** (October 2026). This document is the plan; the
+code in this repository is every phase of it so far. pythia-postgres,
+pythia-mssql and pythia-mongo run on all of it. Where the two disagree, the
 code is what runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
@@ -196,7 +196,10 @@ developer's terminal.
 
 - `hook pre-tool`, the PreToolUse guard. It **denies** the engine's raw
   client (named anywhere in the command) given write SQL or a script (its
-  flags read with quoted SQL emptied), an MCP SQL tool given write SQL, a
+  flags read with quoted SQL emptied — and read again inside a quoted
+  string that itself starts the client, as `bash -c '...'` hands a shell a
+  command), an MCP SQL tool given write SQL (its input read both for the
+  strings it holds and as the JSON document it is), a
   grant written by hand or minted from a one-liner, the agent setting
   `<PREFIX>_CI`, reading `connections.json`, and editing the policy or the
   journal by hand. It **allows** without a prompt one plain command of the
@@ -206,6 +209,15 @@ developer's terminal.
   `policy set`, and anything a shell could turn into two commands. Commands
   are classified by the CLI's own parser, so the guard and the command can
   never read one argv two ways. It fails silent: a crash is no decision.
+
+  Two optional engine methods, in no tier (Phase 5c), serve a database
+  whose MCP servers do not take SQL: `mcp_tool_pattern()` says which MCP
+  tools are its database's (`mongo` for MongoDB's servers; without it, a
+  tool is a database's when its name says `sql`, `query`, `exec`,
+  `statement`, `database` or `db`), and
+  `mcp_write_tool_pattern()` which of those write by their name alone
+  (`insert-many`, `drop-collection`). An engine's own MCP approver is never
+  denied.
 - `hook session-start`, the brief: the rules in Learn/Ask/Do form, how this
   machine spells the command, and the project's state (connections,
   policy).
@@ -343,7 +355,7 @@ does this for PostgreSQL.
 | Plan without running | `EXPLAIN PLAN` + `DBMS_XPLAN` | `EXPLAIN` without `ANALYZE` (`ANALYZE` executes: refused) | `SET SHOWPLAN_XML ON` | `explain("queryPlanner")` (`executionStats` executes: refused) |
 | Script splitting | `;` and `/`, q-quotes, SQL*Plus directives refused | `;`, dollar quotes `$tag$`, `E''` strings; psql meta-commands (`\i`, `\gexec`) refused | `GO` separator (a client construct, not T-SQL); `CREATE PROCEDURE` must open its batch | one command document per file (Extended JSON). JavaScript is refused, as pythia refuses anonymous PL/SQL blocks |
 | Comments on objects | `COMMENT ON` | `COMMENT ON` (`obj_description`, `col_description`) | extended property `MS_Description` | none: a `$jsonSchema` `description` |
-| Raw clients the guard denies | `sqlplus`, `sql`, SQLcl MCP `run-sql` | `psql` (and `pg_restore` into a database) | `sqlcmd`, `osql`, `isql`, `mssql-cli`, `Invoke-Sqlcmd`; `bcp ... in`; `sqlpackage` Publish and Import. A procedure first in a batch needs no `EXEC`, so any `sp_`/`xp_` name counts as a write | `mongosh`, `mongo`, `mongoimport`, `mongorestore` |
+| Raw clients the guard denies | `sqlplus`, `sql`, SQLcl MCP `run-sql` | `psql` (and `pg_restore` into a database) | `sqlcmd`, `osql`, `isql`, `mssql-cli`, `Invoke-Sqlcmd`; `bcp ... in`; `sqlpackage` Publish and Import. A procedure first in a batch needs no `EXEC`, so any `sp_`/`xp_` name counts as a write | `mongosh` and `mongo` given a write method, `$out`, `$merge`, `load()` or a script; `mongoimport`, `mongorestore`, `mongofiles`; an MCP tool named for a write (`insert-many`, `drop-collection`) or given a writing command document |
 | The tool's own statements | `queries/`, one file each | `queries/*.sql`, pyformat binds | `queries/*.sql`, pyformat binds (`%%` adapted for pymssql) | `commands/*.json`: a command document, each bind a `{"$bind": ...}` value |
 | Identifier case | unquoted folds to upper | unquoted folds to lower | per collation (usually case-insensitive) | case-sensitive |
 | "Schema" | user / schema | schema (inside a database); the default is `public` | schema (`dbo` by default) | database |
@@ -418,9 +430,9 @@ against a real database (a disposable container, never a shared one).
 | 4a · SQL Server reads · done | — | pythia-mssql: the driver spike (§8), connect and read tiers, `errors` through `sys.dm_sql_referenced_entities`, tables rebuilt by `ddl`; CI against SQL Server 2022 in a service container | every read command passes against a fixture on a real server as a least-privilege login, and `ddl` rebuilds what it describes |
 | 4b · SQL Server writes · done | `escaped`: a rehearsal whose transaction ended inside the statement is never called unwritten — exit 3, the approval spent, a lease paused; previews name only the doors an engine has | the write tier: a T-SQL reader (`N''`, `[ ]`, nested comments, `GO`), classification, the rehearsal verified by binding modules before and after and run one transaction level down (a trigger's `COMMIT` commits nothing), rows revalidated by `CHECKSUM_AGG` | as Phase 2, for SQL Server — and a trigger that commits past the rehearsal is reported as written, on a real server |
 | 4c · SQL Server harness · done | — | harness (`sqlcmd`, `osql`, `Invoke-Sqlcmd`, `bcp in`, `sqlpackage` Publish), release (`GO` batches, a module's body to the end of its batch) and lint tiers (ten T-SQL rules), the `pythia-mssql-*` skills | as Phase 3, for SQL Server: `install` field-tested, and a release, a lint error and a lease write on a real server |
-| **5a · MongoDB reads (now)** | `cols` may name a blind spot (columns inferred from a sample); the `document` bind style | pythia-mongo: pymongo, every command a reviewable file (`commands/`), connect and read tiers — `cols` from a sample, `impact` through view pipelines, `errors` as the documents a validator rejects and views that fail; CI against MongoDB 7.0 and 8.0 replica sets | every read command passes against a fixture on a real server as a `read`-role user, and `ddl` rebuilds what it describes |
-| 5b · MongoDB writes | a second write path for what cannot be rehearsed: predicted before approval, written, verified after — exit 3 when the result differs from the prediction | data rehearsed in a transaction (a replica set is required); validators, indexes and views predicted (the documents a validator would reject, the duplicates a unique index would meet, a view's first documents); snapshot and restore | as Phase 2, for MongoDB, with every prediction checked against what the write did |
-| 5c · MongoDB harness | — | `mongosh`, `mongoimport`, `mongorestore` guard patterns, validator and index lint rules, the `pythia-mongo-*` skills | as Phase 3, for MongoDB |
+| 5a · MongoDB reads · done | `cols` may name a blind spot (columns inferred from a sample); the `document` bind style | pythia-mongo: pymongo, every command a reviewable file (`commands/`), connect and read tiers — `cols` from a sample, `impact` through view pipelines, `errors` as the documents a validator rejects and views that fail; CI against MongoDB 7.0 and 8.0 replica sets | every read command passes against a fixture on a real server as a `read`-role user, and `ddl` rebuilds what it describes |
+| 5b · MongoDB writes · done | a second write path for what cannot be rehearsed: predicted before approval, written, verified after — exit 3 when the result differs from the prediction | data rehearsed in a transaction (a replica set is required); validators, indexes and views predicted (the documents a validator would reject, the duplicates a unique index would meet, a view's first documents); snapshot and restore | as Phase 2, for MongoDB, with every prediction checked against what the write did |
+| 5c · MongoDB harness · done | the MCP hooks (`mcp_tool_pattern`, `mcp_write_tool_pattern`); an MCP tool's input read as a document too, keys included; a script read inside a quoted command (`bash -c '...'`); a predicted write's report says it was read back | harness (`mongosh`, `mongo`, `mongoimport`, `mongorestore`, `mongofiles`, MongoDB's MCP tools by name), release (a data release: one command document or a JSON array of them per file) and lint tiers (seven rules over validators, indexes and updates), the `pythia-mongo-*` skills | as Phase 3, for MongoDB: `install` field-tested, and a release, a lint finding and a lease write on a real server |
 
 Not planned: moving pythia for Oracle onto pythia-core. That would be the
 owner's decision, taken after Phase 3, when there is a core worth moving to.

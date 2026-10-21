@@ -425,7 +425,8 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
     if ok and group == "data_dml":
         print(f"\n  Applied — {rehearsal['rows']} rows changed and committed.")
     elif ok:
-        print(f"\n  Applied {obj} ({otype}).")
+        print(f"\n  Applied {obj} ({otype})" +
+              (" — read back after the write: as predicted." if predicted else "."))
     elif own or broken:
         print(f"\n  Applied {obj} ({otype}) — but it is broken:")
         for name_, type_, msg in own + broken:

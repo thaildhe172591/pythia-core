@@ -126,6 +126,14 @@ HARNESS = (
     "connections_template",  # () -> the connections.json install scaffolds
     "skills_dir",           # () -> the folder holding the engine's skills
 )
+# Optional, in no tier (getattr with a default):
+#   mcp_tool_pattern()        regex over "server__tool": which MCP tools are
+#                             this database's (default: names that sound like
+#                             SQL — sql, query, exec, statement, database, db)
+#   mcp_write_tool_pattern()  regex over the tool's own name: those of the
+#                             database's tools that write by name alone
+#                             (MongoDB's insert-many, drop-collection)
+#   rollback_notes            {group: whether rollback is real}, for `policy`
 
 RELEASE = (
     # Settled in Phase 3c: what deploy needs beyond the write tier.

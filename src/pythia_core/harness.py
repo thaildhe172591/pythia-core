@@ -24,6 +24,7 @@ the token, the grant, the re-rehearsal — hold whatever the hook decided.
 """
 import contextlib
 import io
+import json
 import os
 import pathlib
 import re
@@ -285,15 +286,32 @@ def client_invoked(pattern, command):
         r"(?=$|[\s;&|)\"'`])", command or "", re.I) is not None
 
 
+def quoted_commands(command):
+    """Each quoted string in a shell command, unquoted, and the strings
+    quoted inside it: where `bash -c '...'` or `ssh host "..."` hands a
+    shell a command of its own."""
+    for m in QUOTED_RE.finditer(command or ""):
+        inner = m.group(0)[1:-1]
+        if m.group(0)[0] == '"':
+            inner = re.sub(r"\\(.)", r"\1", inner)
+        yield inner
+        yield from quoted_commands(inner)
+
+
 def raw_write(engine, command):
     """The client with write SQL anywhere in the command (it is usually
     quoted), or reading a script the way the shell hands it one (`-f`,
     `<`, a pipe) — matched with quoted text emptied, so SQL that holds a
-    `<` is not taken for a redirection."""
-    if not client_invoked(engine.raw_client_pattern(), command):
+    `<` is not taken for a redirection. A quoted string that itself starts
+    the client is a command a shell will run, and is read the same way."""
+    client = engine.raw_client_pattern()
+    if not client_invoked(client, command):
         return False
-    return bool(re.search(engine.write_sql_pattern(), command, re.I)
-                or re.search(engine.script_pattern(), unquoted(command), re.I))
+    if re.search(engine.write_sql_pattern(), command, re.I):
+        return True
+    return any(re.search(engine.script_pattern(), unquoted(c), re.I)
+               for c in [command] + [q for q in quoted_commands(command)
+                                     if client_invoked(client, q)])
 
 
 # --- the decision -------------------------------------------------------------------------
@@ -351,9 +369,21 @@ def _decide(engine, payload, now):
 
     if tool.startswith("mcp__"):
         own = f"mcp__{engine.command.replace('-', '_')}__"
-        if tool.startswith(own) or not SQL_TOOL_RE.search(tool[len("mcp__"):]):
+        rest = tool[len("mcp__"):]
+        # an engine whose database takes no SQL names its own MCP tools, and
+        # those whose name alone is a write (MongoDB's insert-many)
+        named = getattr(engine, "mcp_tool_pattern", None)
+        ours = re.search(named(), rest, re.I) if named else SQL_TOOL_RE.search(rest)
+        if tool.startswith(own) or not ours:
             return None
-        if re.search(engine.write_sql_pattern(), " ".join(_strings(tin)), re.I):
+        writes = getattr(engine, "mcp_write_tool_pattern", None)
+        if writes and re.search(writes(), rest.split("__", 1)[-1], re.I):
+            return _deny(why["mcp"])
+        # the strings it holds, and the document it is: a command document's
+        # keys ({"drop": ...}, $merge) are where a document database writes
+        pattern = engine.write_sql_pattern()
+        if re.search(pattern, " ".join(_strings(tin)), re.I) or \
+                re.search(pattern, json.dumps(tin, ensure_ascii=False, default=str), re.I):
             return _deny(why["mcp"])
         return None
 
