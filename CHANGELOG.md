@@ -14,6 +14,8 @@ on every version.
 - **DESIGN plans Phase 9, pythia-mysql**, and settles its question: PyMySQL,
   MySQL 8.4 LTS as the floor, DDL predicted (it commits implicitly) and data
   rehearsed. The engine needs nothing new from the core.
+- **SECURITY names MySQL's limits**: a rehearsal that writes to a table MySQL
+  cannot roll back is reported escaped; a routine is replaced in two steps.
 
 ## 0.1.0 — 2026-10-21
 
