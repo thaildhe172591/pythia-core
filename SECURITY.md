@@ -57,4 +57,14 @@ sets out to forge.
   name first, so a refused text costs nothing; if MySQL still refuses the
   real one, the old one is put back from the snapshot — which needs
   `SET_ANY_DEFINER` when another account defined it, and the preview says
-  when this account lacks it.
+  when this account lacks it. MariaDB replaces one in a single `CREATE OR
+  REPLACE`, which keeps the old one when it refuses the new.
+- **MariaDB marks no view invalid.** A prediction there opens each view that
+  reads what the statement touches — found in their stored definitions —
+  with `SELECT ... LIMIT 0`, before the preview and after the write; a view
+  that reads it some other way (a name built at run time) is not opened.
+- **Nothing that commits runs in a rehearsal or a prediction.** `CHECK
+  TABLE`, `ANALYZE` and any DDL commit the transaction they run in: inside
+  a release, the rows rehearsed before them would land. pythia-mysql's live
+  check caught exactly that once (a MariaDB prediction ran `CHECK TABLE`),
+  and its suite now refuses `CHECK TABLE` in any write path.

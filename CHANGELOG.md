@@ -5,8 +5,10 @@
 - **DESIGN settles question 7, MariaDB**: it is read and written by
   pythia-mysql, from 10.11 LTS; its views are read in their stored
   definitions and checked by `CHECK TABLE`; sequences are written, packages
-  only read. Phase 11a (reads) is done, 11b (writes) planned. The engine
-  needs nothing new from the core.
+  only read. Phases 11a (reads) and 11b (writes) are done: pythia-mysql
+  0.2.0. The engine needs nothing new from the core.
+- **SECURITY names MariaDB's limits**, and one rule for every engine:
+  nothing that commits implicitly runs in a rehearsal or a prediction.
 
 ## 0.1.1 — 2026-10-21
 

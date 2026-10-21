@@ -471,7 +471,7 @@ against a real database (a disposable container, never a shared one).
 | 9c · MySQL harness · done | — | the harness tier (the `mysql`, `mysqlsh`, `mariadb` clients, `mysqlimport`, `mysqladmin`), the release tier (`DELIMITER` and stored-program bodies; a release is data only, its DDL refused with nothing written), ten lint rules (`mysql-non-transactional` the one error), the seven `pythia-mysql-*` skills, the `family` job with four engines, 0.1.0 prepared | as Phase 3, for MySQL: the live check lands a release whole, rolls one back whole when its rows move after approval, shows a lint error in a real preview, and lands a predicted write under a lease |
 | 10 · second release · done | version 0.1.1: `floor_warning`, and DESIGN and SECURITY for MySQL | pythia-postgres, pythia-mssql and pythia-mongo 0.1.1 (their floors), pythia-mysql 0.1.0, each asking for `pythia-core>=0.1.1,<0.2` | the five wheels install together from one index, core first; each tag publishes, and `pip install pythia-mysql` from PyPI installs a working command |
 | 11a · MariaDB reads · done | — | pythia-mysql reads MariaDB: the server known on connecting; MariaDB's own query files where its catalog differs; views read in their stored definitions (`definition`); `errors` by `CHECK TABLE`; its privileges and roles read from `SHOW GRANTS`; sequences and packages; writes refused until 11b; CI on MariaDB 10.11, 11.4 and 11.8 | every read command passes on each, and every object's `ddl` — a sequence and a package among them — runs into a copy that matches its original |
-| 11b · MariaDB writes | — | the write path on MariaDB: views predicted from their definitions and checked by `CHECK TABLE` after the write; its own `CREATE OR REPLACE`; its definer privileges; sequences written, packages refused; release 0.2.0 | as Phase 9b, for MariaDB |
+| 11b · MariaDB writes · done | — | the write path on MariaDB: views opened with `SELECT ... LIMIT 0` before and after (never `CHECK TABLE`, which commits), the candidates read from view definitions; a routine, trigger or event replaced by its own `CREATE OR REPLACE`; `SET USER` for another definer; sequences written, packages, `RETURNING` and `DELETE HISTORY` refused; pythia-mysql 0.2.0 | as Phase 9b, for MariaDB: every write path of the live check passes on 10.11, 11.4 and 11.8, and a release holding DDL lands nothing |
 
 Not planned: moving pythia for Oracle onto pythia-core. That would be the
 owner's decision, taken after Phase 3, when there is a core worth moving to.
@@ -557,5 +557,8 @@ Each is asked when its phase starts, not guessed now:
      events, sequences (no catalog table before 11.5: `SHOW CREATE
      SEQUENCE`) and, in `sql_mode=ORACLE`, packages. Sequences are read and
      written; packages are read, and refused for writing.
+   - `CHECK TABLE` commits the transaction it runs in, as any statement
+     that commits implicitly: it runs only in `errors`' read session, and a
+     write opens a view with `SELECT ... LIMIT 0` instead.
    - The floor is 10.11 LTS (10.6 reached its end of life in July 2026); CI
      runs 10.11, 11.4 and 11.8.
