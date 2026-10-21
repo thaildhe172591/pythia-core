@@ -217,6 +217,19 @@ def test_a_member_that_escaped_the_transaction_takes_the_release_with_it():
         assert len(doc["restore"]) == 2
 
 
+def test_a_release_whose_commit_did_not_answer_is_written_question():
+    e = engine()
+    with project(e) as p:
+        names = scripts(p, ("rel.sql", [COMMENT, FN]))
+        batch = preview(p, *names)["batch"]
+        p.approve(batch)
+        e.conn.commit_fails = True
+        code, out, why = p.run("deploy", *names, "--confirm", batch)
+        assert code == 3 and "WRITTEN?" in out and "statements 1-2" in out, (code, why, out)
+        assert "commit did not answer" in out and "error:" not in why.lower()
+        assert grants.read(p.state, batch)["used_at"]
+
+
 def test_a_statement_that_can_only_be_predicted_has_no_place_in_a_release():
     # all or nothing needs one transaction; a predicted write runs outside it
     e = FakePredictEngine()

@@ -282,6 +282,22 @@ def test_a_statement_that_escaped_the_transaction_is_never_called_unwritten():
         assert grants.read(p.state, token)["used_at"]
 
 
+def test_a_commit_that_did_not_answer_is_never_called_a_failure():
+    # the connection drops during COMMIT: it may have landed, or not
+    e = FakeWriteEngine()
+    e.conn.objects["f_total()"] = OLD
+    with project(e) as p:
+        token = p.preview(NEW)["token"]
+        p.approve(token)
+        e.conn.commit_fails = True
+        code, out, why = p.run("apply", "change.sql", "--confirm", token)
+        assert code == 3, (code, why, out)
+        assert "WRITTEN?" in out and "commit did not answer" in out
+        assert "error:" not in why.lower() and "nothing was written" not in out.lower()
+        assert grants.read(p.state, token)["used_at"]
+        assert journal.kind(journal.read_entry(p.state, p.entries()[0])["meta"]) == "escaped"
+
+
 # --- a statement that cannot be rehearsed: predicted, written once, checked after ---
 
 def test_a_prediction_runs_nothing_and_says_so():

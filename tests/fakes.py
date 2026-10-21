@@ -162,8 +162,11 @@ class WriteConn(FakeConn):
         self.executed = []         # every statement the predict path ran for real
         self.execute_result = None  # {"error"} or {"escaped"} the next execute returns
         self.differs = []          # what verify_written finds unlike the prediction
+        self.commit_fails = False  # COMMIT raises: whether it landed is unknown
 
     def commit(self):
+        if self.commit_fails:          # the connection drops during COMMIT
+            raise DriverError("server closed the connection unexpectedly")
         self.commits += 1
         for kind, key, value in self.pending:
             getattr(self, kind)[key] = value

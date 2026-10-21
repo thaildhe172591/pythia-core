@@ -368,7 +368,8 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
         done = engine.execute(conn, schema, group, stmt, ident) or {}
         if done.get("escaped"):
             return report_escape(engine, conn, ns, eid, group, ident, snap,
-                                 {**outcome, **done}, name, confirm)
+                                 {**outcome, "escape_head": f"{engine.label} could "
+                                  "not confirm the write", **done}, name, confirm)
         if done.get("error"):
             conn.rollback()
             journal.update_entry(state, eid, refused=True, error=done["error"])
@@ -378,7 +379,14 @@ def run_apply(engine, conn, ns, text, origin=None, then=None):
                      f"written.\n  {done['error']}\nThe approval is unspent: fix "
                      "the cause and retry the same command, or fix the file and "
                      "preview again.")
-    conn.commit()
+    try:
+        conn.commit()
+    except engine.driver_errors() as e:
+        # the connection dropped during COMMIT: it may have landed, or not
+        return report_escape(engine, conn, ns, eid, group, ident, snap,
+                             {**outcome, "escape_head": COMMIT_HEAD,
+                              "escaped": COMMIT_UNANSWERED, "error": str(e)},
+                             name, confirm)
     if via == "grant":
         grants.spend(state, confirm)
     journal.update_entry(state, eid, applied=True, confirmed_via=via)
@@ -466,7 +474,7 @@ def report_escape(engine, conn, ns, eid, group, ident, snap, outcome, name,
     """The engine's transaction ended inside the statement — a trigger that
     commits, say. What ran may already be committed, approved or not, so it
     is never reported as unwritten: exit 3, with the way back."""
-    conn.rollback()
+    rollback_quietly(engine, conn)
     state = ns.state
     undo = mark_escape(engine, state, eid, group, ident, snap, outcome, name)
     if confirm:
@@ -478,8 +486,9 @@ def report_escape(engine, conn, ns, eid, group, ident, snap, outcome, name,
                           "error": outcome.get("error"), "object": outcome.get("object") or name,
                           "restore": undo, "journal": eid, "exit": 3}))
         return 3
-    print(f"\n  WRITTEN? — {engine.label} ended pythia's transaction inside the "
-          f"statement: {outcome['escaped']}.")
+    head = outcome.get("escape_head") or (
+        f"{engine.label} ended pythia's transaction inside the statement")
+    print(f"\n  WRITTEN? — {head}: {outcome['escaped']}.")
     if outcome.get("error"):
         print(f"    {outcome['error']}")
     print(f"  What ran may already be committed{'' if confirm else ' — nobody approved that'}, "
@@ -584,6 +593,18 @@ def _print_preview(group, obj, otype, schema, created, changed, summary,
         for ln in diff_text.splitlines():
             print(f"  {ln}")
     print(f"\n  Snapshot saved: {entry_path}")
+
+
+COMMIT_HEAD = "the connection failed during COMMIT"
+COMMIT_UNANSWERED = "the commit did not answer, so whether it landed is unknown"
+
+
+def rollback_quietly(engine, conn):
+    """Roll back what is left, on a connection that may be dead already."""
+    try:
+        conn.rollback()
+    except engine.driver_errors() + (OSError,):
+        pass
 
 
 PREDICTED_NOTE = ("nothing ran: this is a prediction from the data as it "

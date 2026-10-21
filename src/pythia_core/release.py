@@ -342,7 +342,14 @@ def run_deploy(engine, conn, ns):
         _print_preview(engine, ns, rec, auto_why)
         return 0
 
-    conn.commit()
+    try:
+        conn.commit()
+    except engine.driver_errors() as e:
+        # the connection dropped during COMMIT: the whole release may have landed
+        return _report_escape(engine, conn, ns, Escaped(
+            len(members), "the commit", {"escape_head": gate.COMMIT_HEAD,
+                                         "escaped": gate.COMMIT_UNANSWERED,
+                                         "error": str(e)}, members, None), confirm)
     if confirm:
         grants.spend(state, confirm)
         approved["applied"] = True
@@ -366,7 +373,7 @@ def run_deploy(engine, conn, ns):
 def _report_escape(engine, conn, ns, esc, confirm):
     """A trigger's COMMIT at statement n commits statements 1..n with it: the
     release is never reported as rolled back. Exit 3, with every way back."""
-    conn.rollback()
+    gate.rollback_quietly(engine, conn)
     state = ns.state
     for m in esc.members:
         journal.update_entry(state, m["entry"], escaped=f"statement {esc.n} escaped "
@@ -385,8 +392,9 @@ def _report_escape(engine, conn, ns, esc, confirm):
                                       "error": esc.outcome.get("error")},
                           "restore": undos, "exit": 3}))
         return 3
-    print(f"\n  WRITTEN? — {esc.where}: {engine.label} ended pythia's transaction "
-          f"inside it: {esc.outcome['escaped']}.")
+    head = esc.outcome.get("escape_head") or (
+        f"{esc.where}: {engine.label} ended pythia's transaction inside it")
+    print(f"\n  WRITTEN? — {head}: {esc.outcome['escaped']}.")
     if esc.outcome.get("error"):
         print(f"    {esc.outcome['error']}")
     span = f"statements 1-{esc.n}" if esc.n > 1 else "statement 1"

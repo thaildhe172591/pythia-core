@@ -15,6 +15,11 @@ rehearsed.
   and pauses an autopilot lease. The journal keeps `verified_after`.
 - **`deploy` refuses a predicted statement** before anything is written:
   all or nothing needs one transaction.
+- **A COMMIT that did not answer is `WRITTEN?`, never an error.** A
+  connection that fails during COMMIT (any engine) left the write landed or
+  not, and nobody can tell which: `apply` and `deploy` now report it as
+  escaped — exit 3, the approval spent, every restore printed — where they
+  used to exit 1 with "error". Each kind of escape says its own cause.
 - **An engine that predicts without the predict tier is refused** before
   its preview.
 - Adversarial tests in `test_gate.py`, `test_release.py`, `test_lease.py`,
