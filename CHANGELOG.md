@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **DESIGN settles question 7, MariaDB**: it is read and written by
+  pythia-mysql, from 10.11 LTS; its views are read in their stored
+  definitions and checked by `CHECK TABLE`; sequences are written, packages
+  only read. Phase 11a (reads) is done, 11b (writes) planned. The engine
+  needs nothing new from the core.
+
 ## 0.1.1 — 2026-10-21
 
 Phase 8 of the plan in DESIGN.md — the minimum versions, settled by a CI
