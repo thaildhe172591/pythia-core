@@ -36,9 +36,9 @@ learns that these packages exist.
 | pythia-mongo | `pythia-mongo` | `pythia_mongo` | `pythia-mongo` | pymongo | `.pythia/mongo/` |
 | pythia-mysql | `pythia-mysql` | `pythia_mysql` | `pythia-mysql` | PyMySQL (settled in Phase 9, §8) | `.pythia/mysql/` |
 
-pythia-core and the first three engines are on PyPI since 0.1.0 (§8,
-question 4); the second release (Phase 10) brings pythia-mysql there with
-its 0.1.0, which asks for pythia-core 0.1.1.
+All five are on PyPI (§8, question 4): pythia-core and the first three
+engines since 0.1.0, pythia-mysql since its 0.1.0, which asks for
+pythia-core 0.1.1 (the second release, Phase 10).
 
 ## 2. Living next to pythia for Oracle
 
@@ -469,7 +469,7 @@ against a real database (a disposable container, never a shared one).
 | 9a · MySQL reads · done | — | pythia-mysql: the driver spike (§8), connect and read tiers — read sessions `READ ONLY`; `impact` through view usage, triggers and foreign keys, then routine, trigger and event bodies by name; what the account cannot see read from `SHOW GRANTS` and named; `errors` as the views MySQL marked invalid; `src` and `ddl` rebuilt; CI against MySQL 8.4, 9.4 and 9.5 | every read command passes against a fixture on a real server as a least-privilege account, with and without `TRIGGER` and `EVENT`, and every `ddl` runs into a copy that matches its original |
 | 9b · MySQL writes · done | — (the predict tier of Phase 5b) | data rehearsed in a transaction, first inside a savepoint so a write MySQL cannot roll back (warning 1196) is `escaped`; rows checked by count and an order-free sum of `md5(json_array(...))`; DDL predicted — a view's SELECT run with `LIMIT 0`, the views MySQL would mark invalid read from information_schema — then written once and read back (exit 3 when it differs); routines `NOT VERIFIED`; a CREATE for an existing routine replaces it, checked under a scratch name first, the old one put back if MySQL refuses the new; snapshot and restore | as Phase 2, for MySQL, with every prediction checked against what the write did, a MyISAM leak reported `WRITTEN?`, and a restore that needs `SET_ANY_DEFINER` refused with nothing written |
 | 9c · MySQL harness · done | — | the harness tier (the `mysql`, `mysqlsh`, `mariadb` clients, `mysqlimport`, `mysqladmin`), the release tier (`DELIMITER` and stored-program bodies; a release is data only, its DDL refused with nothing written), ten lint rules (`mysql-non-transactional` the one error), the seven `pythia-mysql-*` skills, the `family` job with four engines, 0.1.0 prepared | as Phase 3, for MySQL: the live check lands a release whole, rolls one back whole when its rows move after approval, shows a lint error in a real preview, and lands a predicted write under a lease |
-| 10 · second release | version 0.1.1: `floor_warning`, and DESIGN and SECURITY for MySQL | pythia-postgres, pythia-mssql and pythia-mongo 0.1.1 (their floors), pythia-mysql 0.1.0, each asking for `pythia-core>=0.1.1,<0.2` | the five wheels install together from one index, core first; each tag publishes, and `pip install pythia-mysql` from PyPI installs a working command |
+| 10 · second release · done | version 0.1.1: `floor_warning`, and DESIGN and SECURITY for MySQL | pythia-postgres, pythia-mssql and pythia-mongo 0.1.1 (their floors), pythia-mysql 0.1.0, each asking for `pythia-core>=0.1.1,<0.2` | the five wheels install together from one index, core first; each tag publishes, and `pip install pythia-mysql` from PyPI installs a working command |
 
 Not planned: moving pythia for Oracle onto pythia-core. That would be the
 owner's decision, taken after Phase 3, when there is a core worth moving to.
