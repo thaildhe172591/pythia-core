@@ -38,6 +38,47 @@ def test_version_matches_pyproject():
     assert pythia_core.__version__ == declared
 
 
+def test_the_version_has_its_changelog_entry():
+    # a release is tagged from a version whose changes are written down
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert re.search(rf"^## {re.escape(pythia_core.__version__)} ", text, re.M), \
+        f"CHANGELOG.md has no entry for {pythia_core.__version__}"
+
+
+def test_the_release_workflow_checks_the_tag_against_the_version():
+    text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert 'tags: ["v*"]' in text and "environment: pypi" in text
+    assert "id-token: write" in text and "skip-existing: true" in text
+    for needle in ('version = \\"$V\\"', '__version__ = \\"$V\\"', "## $V "):
+        assert needle in text, needle
+
+
+def readme_shape(text):
+    """What the two READMEs must share: the heading levels in order, and
+    every fenced block, byte for byte — the commands do not translate."""
+    levels = [len(m.group(1)) for m in re.finditer(r"^(#+) ", text, re.M)]
+    blocks = re.findall(r"^```[^\n]*\n(.*?)^```", text, re.M | re.S)
+    return levels, blocks
+
+
+def test_the_vietnamese_readme_matches_the_english_one():
+    en = (ROOT / "README.md").read_text(encoding="utf-8")
+    vi = (ROOT / "README.vi.md").read_text(encoding="utf-8")
+    assert readme_shape(vi) == readme_shape(en), "README.vi.md has drifted from README.md"
+    assert re.search(r"\[Tiếng Việt\]\([^)]*README\.vi\.md\)", en), "README.md links no translation"
+    assert re.search(r"\[English\]\([^)]*README\.md\)", vi), "README.vi.md links no original"
+
+
+def test_the_package_says_what_it_is_on_pypi():
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    level = "Alpha" if re.match(r"0\.\d+\.\d+$", pythia_core.__version__) else None
+    if level:
+        assert f'"Development Status :: 3 - {level}"' in text
+    for needle in ('readme = "README.md"', '"Programming Language :: Python :: 3.9"',
+                   '"Programming Language :: Python :: 3.13"', "Changelog = "):
+        assert needle in text, needle
+
+
 def test_no_runtime_dependencies():
     # the core is stdlib only: a driver belongs to its engine package
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")

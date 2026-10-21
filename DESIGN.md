@@ -1,9 +1,9 @@
 # The pythia family — design
 
-Status: **Phase 6 complete** (October 2026). This document is the plan; the
-code in this repository is every phase of it so far. pythia-postgres,
-pythia-mssql and pythia-mongo run on all of it, and run side by side in one
-project. Where the two disagree, the
+Status: **0.1.0, the first release** (October 2026). This document is the
+plan; the code in this repository is every phase of it so far.
+pythia-postgres, pythia-mssql and pythia-mongo run on all of it, and run
+side by side in one project. Where the two disagree, the
 code is what runs and this document is wrong — fix it in the same change.
 
 ## 1. What is being built, and what is not
@@ -455,6 +455,7 @@ against a real database (a disposable container, never a shared one).
 | 5b · MongoDB writes · done | a second write path for what cannot be rehearsed: predicted before approval, written, verified after — exit 3 when the result differs from the prediction | data rehearsed in a transaction (a replica set is required); validators, indexes and views predicted (the documents a validator would reject, the duplicates a unique index would meet, a view's first documents); snapshot and restore | as Phase 2, for MongoDB, with every prediction checked against what the write did |
 | 5c · MongoDB harness · done | the MCP hooks (`mcp_tool_pattern`, `mcp_write_tool_pattern`); an MCP tool's input read as a document too, keys included; a script read inside a quoted command (`bash -c '...'`); a predicted write's report says it was read back | harness (`mongosh`, `mongo`, `mongoimport`, `mongorestore`, `mongofiles`, MongoDB's MCP tools by name), release (a data release: one command document or a JSON array of them per file) and lint tiers (seven rules over validators, indexes and updates), the `pythia-mongo-*` skills | as Phase 3, for MongoDB: `install` field-tested, and a release, a lint finding and a lease write on a real server |
 | 6 · several engines in one project · done | an answer hook leaves another tool's card alone; a SQL-sounding MCP tool is denied without being claimed; an install replaces its hooks where they stood; `test_family.py` and the `family` CI job | — | pythia for Oracle and the three engines install into one project in any order, a second run changes nothing, each doctor passes, and each guard and answer hook acts for its own engine only |
+| 7 · first release · done | version 0.1.0; `release.yml` (the tag checked against the version and the changelog, then trusted publishing); README.vi.md held to README.md by a test; PyPI metadata | the same, for each engine; engines ask for `pythia-core>=0.1.0,<0.2` | each repository's tag publishes it to PyPI, core first, and `pip install pythia-postgres` (or `-mssql`, `-mongo`) from PyPI installs a working command |
 
 Not planned: moving pythia for Oracle onto pythia-core. That would be the
 owner's decision, taken after Phase 3, when there is a core worth moving to.
@@ -484,7 +485,10 @@ Each is asked when its phase starts, not guessed now:
    7.0 and 8.0, each a single-node replica set with authentication.
 3. **`plpgsql_check`.** Optional and detected (the current plan), or
    required for any write the gate calls "verified"?
-4. **Publishing.** Whether `pythia-core` and the engine names are free on
-   PyPI when the family is published there.
-5. **Vietnamese documentation.** pythia ships README.vi.md and GUIDE.vi.md.
-   The family should too, from its first release.
+4. **Publishing — settled: PyPI**, as `pythia-core`, `pythia-postgres`,
+   `pythia-mssql` and `pythia-mongo` (all four were free in October 2026).
+   A `vX.Y.Z` tag publishes by trusted publishing, as pythia does; the core
+   goes first, and each engine asks for `pythia-core>=0.1.0,<0.2`.
+5. **Vietnamese documentation — settled for the README.** Each repository
+   ships README.vi.md from 0.1.0, held to README.md's headings and commands
+   by a test. pythia's GUIDE has no family counterpart yet.

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.0 — 2026-10-21
+
+The first release, and the first on PyPI: alpha. Everything in the
+development versions below — 0.1.0.dev0 to 0.13.0.dev0, never published —
+is in it: the engine contract and its tiers, the read commands, the write
+gate (snapshot, rehearse or predict, preview, a person's approval, journal,
+restore), `deploy`, autopilot leases, lint, and the harness (the guard, the
+session brief, `install`, `doctor`, the chat and MCP approval doors), for
+several engines in one project.
+
+- **Version 0.1.0** for pythia-core, pythia-postgres, pythia-mssql and
+  pythia-mongo alike; each engine asks for `pythia-core>=0.1.0,<0.2`.
+- **README.vi.md**, the README in Vietnamese; a test holds the two to the
+  same headings and the same commands.
+- **`release.yml`:** a `vX.Y.Z` tag runs every suite, checks that
+  pyproject.toml, `__version__` and this file name that version, and
+  publishes to PyPI by trusted publishing (no token stored anywhere).
+- **PyPI metadata:** the README as the project page, classifiers (Alpha,
+  Python 3.9 to 3.13), and links to the changelog and the issues.
+
 ## 0.13.0.dev0 — unreleased
 
 Phase 6 of the plan in DESIGN.md: several engines in one project. The

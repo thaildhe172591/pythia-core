@@ -1,11 +1,13 @@
 # pythia-core
 
+**English** · [Tiếng Việt](https://github.com/thaildhe172591/pythia-core/blob/main/README.vi.md)
+
 The part of pythia that is the same for every database. Engine packages
 build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres),
 [pythia-mssql](https://github.com/thaildhe172591/pythia-mssql) and
 [pythia-mongo](https://github.com/thaildhe172591/pythia-mongo).
 
-**Pre-alpha (Phase 5 complete).** What is here today:
+**Alpha (0.1.0).** What is here today:
 - the engine contract and its conformance check;
 - per-engine connection resolution;
 - the query-contract lint;
@@ -35,20 +37,26 @@ build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres
     `skill lint`.
 
 What each gate stops, and what it does not, is in
-[SECURITY.md](SECURITY.md). The plan, and how each idea maps to each
-database, is in [DESIGN.md](DESIGN.md).
+[SECURITY.md](https://github.com/thaildhe172591/pythia-core/blob/main/SECURITY.md). The plan, and how each idea maps to each
+database, is in [DESIGN.md](https://github.com/thaildhe172591/pythia-core/blob/main/DESIGN.md).
 
 [pythia](https://github.com/thaildhe172591/pythia) for Oracle is a separate,
 self-contained tool. It does not use this package and is not changed by it.
 
-## Install (from git while pre-alpha)
+## Install
+
+```bash
+pip install pythia-core
+```
+
+pythia-core alone has no command: install an engine package —
+`pythia-postgres`, `pythia-mssql` or `pythia-mongo` — and it comes with it.
+It depends on nothing outside the Python standard library, by contract. The
+development version is the main branch:
 
 ```bash
 pip install "git+https://github.com/thaildhe172591/pythia-core"
 ```
-
-pythia-core alone has no command: install an engine package. It depends on
-nothing outside the Python standard library, by contract.
 
 ## Writing an engine
 
@@ -58,7 +66,7 @@ from pythia_core.engine import engine_problems
 
 class PostgresEngine:
     name, label, command = "postgres", "PostgreSQL", "pythia-pg"
-    env_prefix, version, bind_style = "PYTHIA_PG", "0.1.0.dev0", "pyformat"
+    env_prefix, version, bind_style = "PYTHIA_PG", "0.1.0", "pyformat"
     # ...the connect tier: driver_errors, connect, session, close,
     # connect_failure, schema_of, target_of, server_version, current_schema
     # ...the read tier: object_names, source, columns (which may name a

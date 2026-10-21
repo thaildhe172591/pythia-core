@@ -1,0 +1,54 @@
+name: release
+
+# Tag vX.Y.Z -> publish pythia-core to PyPI.
+# One-time setup (AGENTS.md): a PyPI trusted publisher for this workflow,
+# environment `pypi` — no token stored anywhere.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # the tag is the version: the manifest, the package and the changelog
+      # must already agree with it
+      - name: tag matches the version
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          grep -qF "version = \"$V\"" pyproject.toml
+          grep -qF "__version__ = \"$V\"" src/pythia_core/__init__.py
+          grep -qF "## $V " CHANGELOG.md
+      - run: python -m compileall -q src tests
+      - run: python tests/test_core.py
+      - run: python tests/test_cli.py
+      - run: python tests/test_read.py
+      - run: python tests/test_gate.py
+      - run: python tests/test_harness.py
+      - run: python tests/test_doors.py
+      - run: python tests/test_release.py
+      - run: python tests/test_lease.py
+      - run: python tests/test_lint.py
+      - run: python tests/test_family.py
+
+  pypi:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # PyPI trusted publishing — no token stored anywhere
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true   # a duplicate or delayed run must stay green

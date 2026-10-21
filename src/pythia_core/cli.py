@@ -60,7 +60,7 @@ def build_parser(engine):
 
     p = argparse.ArgumentParser(
         prog=engine.command, allow_abbrev=False,
-        description=f"pythia for {engine.label} (pre-alpha). Each engine "
+        description=f"pythia for {engine.label} (alpha). Each engine "
                     f"keeps its connections in {config_rel(engine)}.")
     sub = p.add_subparsers(dest="command", metavar="<command>")
     sub.required = True

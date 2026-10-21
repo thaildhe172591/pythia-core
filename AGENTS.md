@@ -31,9 +31,24 @@ packages depend on it; pythia for Oracle does not.
 - **Truncation is always announced.** A list is windowed with `clip`; what
   it leaves out is said, with how to get it.
 - **Docs never contradict code.** A behaviour change updates the docstring,
-  README.md, DESIGN.md and CHANGELOG.md in the same change — and
-  SECURITY.md when a gate moves.
-- **Versions** agree in pyproject.toml and `pythia_core.__version__`.
+  README.md and README.vi.md, DESIGN.md and CHANGELOG.md in the same
+  change — and SECURITY.md when a gate moves. A test holds README.vi.md to
+  README.md's headings and commands; the prose is translated by hand.
+- **Versions** agree in pyproject.toml and `pythia_core.__version__`, and
+  the version has its CHANGELOG.md entry (tests/test_core.py).
+
+## Releasing
+
+1. Once per project: a PyPI trusted publisher (pypi.org → your account →
+   Publishing → add a pending publisher: project `pythia-core`, owner
+   `thaildhe172591`, repository `pythia-core`, workflow `release.yml`,
+   environment `pypi`). No token is stored anywhere.
+2. The version in pyproject.toml and `__version__`, its CHANGELOG.md entry
+   dated, and CI green on main.
+3. `git tag vX.Y.Z && git push origin vX.Y.Z`: the `release` workflow runs
+   every suite, checks the tag against the version and the changelog, and
+   publishes. pythia-core goes first — an engine's release needs the core
+   it asks for on PyPI.
 
 ## Never
 
@@ -43,4 +58,4 @@ packages depend on it; pythia for Oracle does not.
   tests come with it.
 - Put real-world identifiers anywhere (hosts, schemas, tenants,
   credentials). Examples use APP_OWNER, PKG_ORDER, T_ORDER. Everything
-  shipped is English.
+  shipped is English, but for README.vi.md, the README's translation.
