@@ -8,7 +8,7 @@ Phần của pythia giống nhau ở mọi database. Các engine package xây tr
 [pythia-mongo](https://github.com/thaildhe172591/pythia-mongo) và
 [pythia-mysql](https://github.com/thaildhe172591/pythia-mysql).
 
-**Alpha (0.1.1).** Những gì đã có:
+**Alpha (0.1.2).** Những gì đã có:
 - engine contract và bộ kiểm tra tuân thủ của nó;
 - chọn connection riêng cho từng engine;
 - lint cho query contract;

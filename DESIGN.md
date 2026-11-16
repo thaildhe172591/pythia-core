@@ -1,6 +1,6 @@
 # The pythia family — design
 
-Status: **0.1.1** (October 2026). This document is the
+Status: **0.1.2** (November 2026). This document is the
 plan; the code in this repository is every phase of it so far.
 pythia-postgres, pythia-mssql, pythia-mongo and pythia-mysql run on all of
 it, and run side by side in one project.
@@ -38,7 +38,8 @@ learns that these packages exist.
 
 All five are on PyPI (§8, question 4): pythia-core and the first three
 engines since 0.1.0, pythia-mysql since its 0.1.0, which asks for
-pythia-core 0.1.1 (the second release, Phase 10).
+pythia-core 0.1.1 (the second release, Phase 10); its 0.3.0 asks for
+pythia-core 0.1.2 (the query tier, `connections add | remove | test`).
 
 ## 2. Living next to pythia for Oracle
 
@@ -555,7 +556,9 @@ Each is asked when its phase starts, not guessed now:
    `pythia-mssql` and `pythia-mongo` (all four were free in October 2026).
    A `vX.Y.Z` tag publishes by trusted publishing, as pythia does; the core
    goes first, and each engine asks for the core's release series
-   (`pythia-core>=0.1.1,<0.2` since 0.1.1, when `floor_warning` arrived).
+   (`pythia-core>=0.1.1,<0.2` since 0.1.1, when `floor_warning` arrived;
+   pythia-mysql asks for `>=0.1.2,<0.2` since its 0.3.0, for the query
+   tier).
    `pythia-mysql` joins with its 0.1.0, in the second release.
 5. **Vietnamese documentation — settled for the README.** Each repository
    ships README.vi.md from 0.1.0, held to README.md's headings and commands
