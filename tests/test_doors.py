@@ -316,7 +316,7 @@ def test_install_wires_the_answer_hook_and_registers_the_approver_locally():
                               .read_text(encoding="utf-8"))
         post = settings["hooks"]["PostToolUse"]
         assert [e["matcher"] for e in post] == ["AskUserQuestion"]
-        assert "approve --hook" in post[0]["hooks"][0]["command"]
+        assert "approve --hook" in install.hook_text(post[0]["hooks"][0])
         doc = json.loads(claude.read_text(encoding="utf-8"))
         assert doc["theme"] == "dark" and "/elsewhere" in doc["projects"]
         entry = doc["projects"][install.project_key(p.root)]["mcpServers"]["pythia_fake"]
@@ -373,6 +373,151 @@ def test_the_brief_names_the_doors_in_order():
         assert order == sorted(order), text
         assert "pythia-fake approve --card <token>" in text
         assert install.instructions_block(p.e).count("AskUserQuestion") >= 1
+
+
+# --- why the chat door could not trace an answer (pythia-core#1, pythia-mysql#5) -------
+
+FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "transcripts"
+
+
+def test_the_transcript_lookup_says_why_it_found_nothing():
+    """None used to mean three things the caller could not tell apart."""
+    asked_q = ["q"]
+    found, why = doors.transcript_lookup({}, asked_q)
+    assert found is None and "transcript_path" in why and "no" in why
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        gone = pathlib.Path(td) / "gone.jsonl"
+        found, why = doors.transcript_lookup(
+            {"transcript_path": str(gone), "tool_use_id": "tu9"}, asked_q,
+            retries=1, pause=0)
+        assert found is None and "could not be opened" in why and str(gone) in why
+        other = pathlib.Path(td) / "t.jsonl"
+        other.write_text(json.dumps({"type": "user", "message": {"content": "hi"}}) + "\n",
+                         encoding="utf-8")
+        found, why = doors.transcript_lookup(
+            {"transcript_path": str(other), "tool_use_id": "tu9"}, asked_q,
+            retries=0, pause=0)
+        assert found is None and "tu9" in why and "bytes" in why
+
+
+def test_an_unreadable_transcript_is_retried_like_a_missing_line():
+    """An OSError used to return at once, skipping the retries."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / "late.jsonl"
+        call = {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "tu1", "name": "AskUserQuestion",
+             "input": {"questions": [{"question": "q"}]}}]}}
+        keep = doors.time.sleep
+
+        def sleep(_s):                   # the file appears between attempts
+            path.write_text(json.dumps(call) + "\n", encoding="utf-8")
+        doors.time.sleep = sleep
+        try:
+            found, why = doors.transcript_lookup(
+                {"transcript_path": str(path), "tool_use_id": "tu1"}, ["q"],
+                retries=2, pause=0.01)
+        finally:
+            doors.time.sleep = keep
+        assert found == {"questions": [{"question": "q"}]}, why
+
+
+def test_a_real_claude_code_transcript_gives_up_the_wire_input():
+    """Claude Code 2.1.32x: the call on an assistant line with wireToolInputs,
+    attachment and api-request-blob lines written after it."""
+    src = (FIXTURES / "claude-code-2.1.32x.jsonl").read_text(encoding="utf-8")
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / "t.jsonl"
+        path.write_text(src.replace("__QUESTION__", "the card"), encoding="utf-8")
+        found, why = doors.transcript_lookup(
+            {"transcript_path": str(path), "tool_use_id": "toolu_01ABC"}, ["x"],
+            retries=0, pause=0)
+        assert found and found["questions"][0]["question"] == "the card", why
+        found, _ = doors.transcript_lookup({"transcript_path": str(path)},
+                                           ["the card"], retries=0, pause=0)
+        assert found and "answers" not in found
+
+
+def test_the_refusal_names_the_cause_and_a_child_session():
+    with project(FakeHarnessEngine()) as p:
+        token = p.preview(NEW)["token"]
+        card = card_of(p, token)
+        payload = asked(card)
+        payload["tool_input"]["answers"] = {card: "Approve"}
+        payload["tool_use_id"] = "tu1"
+        note = chat(p, payload)
+        assert "no transcript_path" in note and "pythia_fake_approve" in note, note
+        os.environ["CLAUDE_CODE_CHILD_SESSION"] = "1"
+        try:
+            note = chat(p, payload)
+        finally:
+            os.environ.pop("CLAUDE_CODE_CHILD_SESSION", None)
+        assert "CLAUDE_CODE_CHILD_SESSION" in note, note
+        assert grants.read(p.state, token) is None
+
+
+def test_the_hook_dump_captures_the_payload_and_the_reason():
+    """PYTHIA_<ENGINE>_HOOK_DUMP=<dir>: the raw payload and why the lookup
+    gave up, written for one real approval to be read afterwards."""
+    import tempfile
+    with project(FakeHarnessEngine()) as p, tempfile.TemporaryDirectory() as dump:
+        token = p.preview(NEW)["token"]
+        card = card_of(p, token)
+        payload = asked(card)
+        payload["tool_input"]["answers"] = {card: "Approve"}
+        os.environ["PYTHIA_FAKE_HOOK_DUMP"] = dump
+        try:
+            chat(p, payload)
+        finally:
+            os.environ.pop("PYTHIA_FAKE_HOOK_DUMP", None)
+        files = list(pathlib.Path(dump).glob("*.json"))
+        assert len(files) == 1
+        doc = json.loads(files[0].read_text(encoding="utf-8"))
+        assert doc["payload"]["tool_name"] == "AskUserQuestion"
+        assert "transcript_path" in doc["transcript"]
+        assert grants.read(p.state, token) is None
+        chat(p, payload)                 # no variable: nothing more written
+        assert len(list(pathlib.Path(dump).glob("*.json"))) == 1
+
+
+def test_doctor_shows_the_last_chat_door_outcome_and_a_child_session():
+    """A door that never mints must be visible: doctor reports the last real
+    outcome, and that a child session may write no transcript."""
+    with project(FakeHarnessEngine()) as p, home():
+        assert run(p, "install")[0] == 0
+        token = p.preview(NEW)["token"]
+        card = card_of(p, token)
+        payload = asked(card)
+        payload["tool_input"]["answers"] = {card: "Approve"}
+        chat(p, payload)
+        rows = json.loads(run(p, "doctor", "--json")[1])["checks"]
+        last = [r for r in rows if r["what"] == "chat door last"]
+        assert last and last[0]["status"] == "warn", rows
+        assert "no grant" in last[0]["detail"] and "transcript_path" in last[0]["detail"]
+        os.environ["CLAUDE_CODE_CHILD_SESSION"] = "1"
+        try:
+            rows = json.loads(run(p, "doctor", "--json")[1])["checks"]
+        finally:
+            os.environ.pop("CLAUDE_CODE_CHILD_SESSION", None)
+        door = {r["what"]: r for r in rows}["chat door"]
+        assert door["status"] == "warn" and "CLAUDE_CODE_CHILD_SESSION" in door["detail"]
+        assert "pythia_fake_approve" in door["detail"]
+        chat(p, asked(card, "Approve"))  # no answer in the input: a real dialog answer
+        rows = json.loads(run(p, "doctor", "--json")[1])["checks"]
+        last = {r["what"]: r for r in rows}["chat door last"]
+        assert last["status"] == "ok" and "minted" in last["detail"], last
+
+
+def test_the_brief_says_a_missing_verdict_means_the_next_door():
+    """pythia-core#2: a client may cancel the PostToolUse hook (seen in
+    Claude Desktop). No verdict from the hook is neither approval nor a
+    reason to ask again: it is the next door."""
+    with project(FakeHarnessEngine()) as p:
+        text = " ".join(harness.brief(p.e).split()).lower()
+        assert "no verdict" in text and "pythia_fake_approve" in text
+        assert "not an approval" in text
 
 
 def main():

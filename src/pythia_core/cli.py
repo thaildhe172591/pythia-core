@@ -34,7 +34,8 @@ COMMAND_TIERS = {"check": ("connect",), "ls": READ_TIERS, "src": READ_TIERS,
                  "cols": READ_TIERS, "ddl": READ_TIERS, "grep": READ_TIERS,
                  "deps": READ_TIERS, "impact": READ_TIERS, "errors": READ_TIERS,
                  "apply": WRITE_TIERS, "restore": WRITE_TIERS,
-                 "deploy": WRITE_TIERS + ("release",)}
+                 "deploy": WRITE_TIERS + ("release",),
+                 "query": ("connect", "query")}
 OFFLINE = ("version", "connections", "approve", "policy", "history", "journal",
            "hook", "install", "doctor", "skill", "mcp", "autopilot", "lint")
 
@@ -66,8 +67,19 @@ def build_parser(engine):
     sub.required = True
     sub.add_parser("version", parents=[common()],
                    help="engine and core versions")
-    sub.add_parser("connections", parents=[common()],
-                   help="configured connections, never their secrets")
+    s = sub.add_parser("connections", parents=[common()],
+                       help="configured connections, never their secrets; add, "
+                            "remove (the developer, at a console) and test them")
+    s.add_argument("action", nargs="?", default="list",
+                   choices=("list", "add", "remove", "test"))
+    s.add_argument("name", nargs="?", default=None)
+    s.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                   dest="fields", help="a field of the new entry (add)")
+    s.add_argument("--password-stdin", action="store_true", dest="password_stdin",
+                   help="read the password from stdin instead of prompting (add; "
+                        "a pipeline with <PREFIX>_CI=1)")
+    s.add_argument("--default", action="store_true", dest="make_default",
+                   help="make the new entry the default (add)")
     sub.add_parser("check", parents=[common()],
                    help="connect read-only and say where unqualified names land")
     s = sub.add_parser("ls", parents=[common()], help="find objects by name")
@@ -91,6 +103,13 @@ def build_parser(engine):
         s.add_argument("name")
         s.add_argument("--depth", type=int, default=3,
                        help="levels to walk (default 3)")
+    s = sub.add_parser("query", parents=[common()],
+                       help="read rows: one SELECT-like statement, in a read-only "
+                            "session, rolled back")
+    s.add_argument("sql", nargs="?", default=None)
+    s.add_argument("-f", "--file", default=None, help="read the statement from a file")
+    s.add_argument("--redact", default="", metavar="COL[,COL]",
+                   help="print *** for these columns (personal data)")
     s = sub.add_parser("errors", parents=[common()],
                        help="what the database's checker reports, and what it "
                             "could not check")
@@ -195,6 +214,11 @@ def cmd_version(engine, ns):
 
 
 def cmd_connections(engine, ns, cfg):
+    action = getattr(ns, "action", "list") or "list"
+    if action in ("add", "remove"):
+        return connections_edit(engine, ns, cfg, action)
+    if action == "test":
+        return connections_test(engine, ns, cfg)
     rows = connection_summary(cfg, engine)
     if ns.json:
         print(json.dumps(rows, indent=2))
@@ -213,6 +237,128 @@ def cmd_connections(engine, ns, cfg):
     return 0
 
 
+def _config_path(engine, ns):
+    override = os.environ.get(f"{engine.env_prefix}_CONFIG")
+    if override:
+        return pathlib.Path(override)
+    return state_dir(ns.root, engine) / "connections.json"
+
+
+def _template_fields(engine):
+    """{field: example value} across the entries of the engine's template."""
+    tmpl = engine.connections_template() if callable(
+        getattr(engine, "connections_template", None)) else {}
+    fields = {}
+    for k, v in (tmpl or {}).items():
+        if k != "default" and isinstance(v, dict):
+            for f, val in v.items():
+                fields.setdefault(f, val)
+    return fields
+
+
+def connections_edit(engine, ns, cfg, action):
+    """`connections add NAME --set k=v ...` and `connections remove NAME`:
+    the file written whole, mode 600, the password prompted for (never an
+    argument, never echoed, never printed). Changing where commands connect
+    is the developer's act, at a console — the agent may not even read the
+    file."""
+    run = engine.command
+    if not human_at_the_keyboard(engine):
+        sys.exit(f"`{run} connections {action}` changes where every command "
+                 "connects: it is the developer's, at a real console. Hand them "
+                 "the command; the agent never writes the connections file.")
+    if not ns.name:
+        sys.exit(f"Usage: {run} connections {action} NAME"
+                 + (" --set host=... --set user=..." if action == "add" else ""))
+    path = _config_path(engine, ns)
+    data = dict(cfg or {})
+    if action == "remove":
+        if ns.name not in data or ns.name == "default":
+            sys.exit(f"No connection {ns.name!r} in {config_rel(engine)}.")
+        del data[ns.name]
+        if data.get("default") == ns.name:
+            del data["default"]
+        _write_config(path, data)
+        print(f"removed    {ns.name} from {config_rel(engine)}")
+        return 0
+    if ns.name in data or ns.name == "default":
+        sys.exit(f"Connection {ns.name!r} already exists in {config_rel(engine)} — "
+                 f"`{run} connections remove {ns.name}` first, or pick another name.")
+    known = _template_fields(engine)
+    entry = {}
+    for item in ns.fields:
+        key, sep, value = item.partition("=")
+        key = key.strip()
+        if not sep or not key:
+            sys.exit(f"--set takes KEY=VALUE, got {item!r}.")
+        if key == "password":
+            sys.exit("The password is never an argument (it would sit in the shell "
+                     "history and the process list): it is prompted for.")
+        if known and key not in known:
+            sys.exit(f"{key!r} is not a field of a {engine.label} connection. "
+                     f"Fields: {', '.join(k for k in known if k != 'password')}.")
+        example = known.get(key)
+        if isinstance(example, bool):
+            entry[key] = value.lower() in ("1", "true", "yes", "on")
+        elif isinstance(example, int):
+            try:
+                entry[key] = int(value)
+            except ValueError:
+                sys.exit(f"{key} takes a number, got {value!r}.")
+        else:
+            entry[key] = value
+    if not known or "password" in known:
+        if ns.password_stdin:
+            entry["password"] = sys.stdin.readline().rstrip("\r\n")
+        else:
+            import getpass
+            entry["password"] = getpass.getpass(f"Password for {ns.name} "
+                                                "(not echoed, empty for none): ")
+    data[ns.name] = entry
+    if ns.make_default:
+        data["default"] = ns.name
+    _write_config(path, data)
+    print(f"added      {ns.name} to {config_rel(engine)} (mode 600; the password "
+          f"is stored, never printed) — `{run} connections test {ns.name}`")
+    return 0
+
+
+def _write_config(path, data):
+    """The whole file, through a temporary created 600 in one step."""
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    if tmp.exists():
+        tmp.unlink()
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    os.replace(str(tmp), str(path))
+
+
+def connections_test(engine, ns, cfg):
+    """Connect read-only to one entry and say what answered, or the
+    engine's own diagnosis of why nothing did."""
+    name, entry = resolve_connection(cfg, ns.name or ns.conn, os.environ, ns.cwd,
+                                     ns.root_found, engine)
+    errors = engine.driver_errors()
+    try:
+        handle = engine.connect(entry)
+    except errors + (OSError,) as e:
+        print(f"FAIL {name}: {engine.connect_failure(e, name, entry)}")
+        return 1
+    try:
+        conn = engine.session(handle, True)
+        print(f"ok   {name}: {engine.server_version(conn)} at "
+              f"{engine.target_of(entry)}")
+        return 0
+    except errors as e:
+        print(f"FAIL {name}: {engine.label} error: {e}")
+        return 1
+    finally:
+        engine.close(handle)
+
+
 # --- connect tier ---------------------------------------------------------------
 
 def cmd_check(engine, conn, ns):
@@ -226,15 +372,24 @@ def cmd_check(engine, conn, ns):
     cols = ("ITEM", "VALUE")
     rows = [("server", version), ("schema", schema),
             ("current_schema", current if current is not None else "")]
+    # what the engine adds about the session: who, encrypted, headroom
+    status = getattr(engine, "status", None)
+    warnings = []
+    for item, value, warning in (status(conn) if status else []):
+        rows.append((item, value))
+        if warning:
+            warnings.append(f"{item}: {warning}")
     if ns.json:
         print(json_envelope("check", name, schema, cols, rows, False,
                             engine=engine.name, schema_drift=drift,
-                            below_floor=below))
+                            below_floor=below, warnings=warnings))
         return 0
     for item, value in rows:
         print(f"{item:<16} {value}")
     if below:
         print(f"\n! {below}")
+    for w in warnings:
+        print(f"! {w}")
     if drift:
         print(f"\n! This session's current schema is {current!r}, but connection "
               f"{name!r} is configured for {schema!r}:\n  an unqualified name "
@@ -292,6 +447,42 @@ def cmd_grep(engine, conn, ns):
     cols, rows = engine.grep(conn, ns.schema, ns.text, fetch_n(ns.limit))
     rows, truncated = clip(rows, ns.limit)
     emit_table(ns, cols, rows, truncated)
+    return 0
+
+
+def query_text(engine, ns):
+    if ns.file:
+        try:
+            return pathlib.Path(ns.file).read_text(encoding="utf-8").strip()
+        except OSError as e:
+            sys.exit(f"Cannot read {ns.file}: {e}")
+    if ns.sql:
+        return ns.sql.strip()
+    sys.exit(f'Usage: {engine.command} query "SELECT ..." (or -f FILE)')
+
+
+def query_refused(engine, ns):
+    """Refusal before any connection: not a read means not here."""
+    why = engine.query_refusal(query_text(engine, ns))
+    if why:
+        sys.exit(f"Refused: {why}\n`{engine.command} query` reads rows only. A "
+                 f"write goes through `{engine.command} apply <file>` (one "
+                 f"statement) or `{engine.command} deploy <files>`.")
+
+
+def cmd_query(engine, conn, ns):
+    text = query_text(engine, ns)
+    cols, rows = engine.run_query(conn, ns.schema, text,
+                                  fetch_n(ns.limit + ns.offset if ns.limit else 0))
+    shown, truncated = clip(list(rows), ns.limit, ns.offset)
+    hide = {c.strip().lower() for c in (ns.redact or "").split(",") if c.strip()}
+    if hide:
+        cols = list(cols)
+        mask = [str(c).lower() in hide for c in cols]
+        shown = [tuple("***" if m else v for v, m in zip(r, mask)) for r in shown]
+    emit_table(ns, list(cols), shown, truncated)
+    if truncated and not ns.json:
+        print(f"-- more rows: --offset {ns.offset + len(shown)}")
     return 0
 
 
@@ -392,7 +583,7 @@ def cmd_deploy(engine, conn, ns):
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "cols": cmd_cols,
             "ddl": cmd_ddl, "grep": cmd_grep, "deps": cmd_deps,
             "impact": cmd_impact, "errors": cmd_errors, "apply": cmd_apply,
-            "restore": cmd_restore, "deploy": cmd_deploy}
+            "restore": cmd_restore, "deploy": cmd_deploy, "query": cmd_query}
 
 
 # --- offline: the developer's half and the record ------------------------------------
@@ -548,7 +739,8 @@ def cmd_skill(engine, ns):
             files.extend(sorted(t.glob("*/SKILL.md")))
     if not files:
         sys.exit("No SKILL.md found. Pass a skill folder or file.")
-    report = {str(f): skills.lint(f) for f in files}
+    # the same skill kept in two homes is linted once
+    report = {str(path): skills.lint(path) for _, path, _ in skills.unique(files)}
     bad = sum(1 for probs in report.values() if probs)
     if ns.json:
         print(json.dumps(report))
@@ -745,6 +937,8 @@ def main(engine, argv=None):
     # must never mask them
     for tier in COMMAND_TIERS[key]:
         refuse_unless(engine, tier, ns.command)
+    if key == "query":
+        query_refused(engine, ns)
     if getattr(ns, "yes", False) and not human_at_the_keyboard(engine):
         sys.exit(gate.headless_yes(engine))
     name, entry = resolve_connection(cfg, ns.conn, os.environ, cwd, root, engine)

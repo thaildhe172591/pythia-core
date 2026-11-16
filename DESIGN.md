@@ -134,7 +134,26 @@ list; this section explains it.
 `floor_warning(conn)` — None, or why the server is older than any version
 the engine is tested on. `check` prints it as a `!` line (and as
 `below_floor` under `--json`); nothing is refused, since an older server
-often still works and the developer decides.
+often still works and the developer decides. A second, `status(conn)`,
+returns `(item, value, warning or None)` rows `check` adds — who the session
+is, whether it is encrypted, connection headroom — each warning a `!` line
+(and `warnings` under `--json`).
+
+**Query tier** (pythia-mysql#1): `query_refusal(sql)` and `run_query(conn,
+schema, sql, fetch)`. Core turns them into `query "SELECT ..."` (or `-f
+FILE`): the engine refuses anything but one statement that only reads before
+a connection opens, the statement runs in the read-only session every read
+runs in and is rolled back with it, the rows are windowed and every cut
+announced, and `--redact COL` prints `***` for personal data. The guard
+waves it through as a read: it removes the main reason an agent reaches for
+the raw client.
+
+**Connections** need no tier: `connections add NAME --set key=value ...`
+writes an entry (the fields are the template's, typed as the template
+types them; the password prompted for, never an argument; the file written
+whole, mode 600), `connections remove NAME` drops one — both the
+developer's, at a console — and `connections test [NAME]` connects
+read-only and prints what answered, or the engine's diagnosis.
 
 **Read tier** (settled in Phase 1): `object_names`, `source`, `columns`,
 `ddl`, `grep`, `dependencies`, `dependents`, `compile_errors`. Names arrive as
@@ -218,7 +237,8 @@ that predicts without the tier is refused before its preview.
 
 **Harness tier** (settled in Phase 3a): `raw_client_pattern`,
 `write_sql_pattern`, `script_pattern`, `connections_template`,
-`skills_dir`. Core turns them into four commands that touch no database
+`skills_dir` (and, optional, `driver_pattern()`: the engine's driver in an
+inline script, denied when the same command holds write SQL). Core turns them into four commands that touch no database
 (`harness.py`, `install.py`, `skills.py`). The chat doors need them too:
 an engine without this tier has no `install`, so no hook reads a chat
 answer and no MCP approver is registered, and its previews name only the
@@ -232,7 +252,14 @@ developer's terminal.
   strings it holds and as the JSON document it is), a
   grant written by hand or minted from a one-liner, the agent setting
   `<PREFIX>_CI`, reading `connections.json`, and editing the policy or the
-  journal by hand. It **allows** without a prompt one plain command of the
+  journal by hand. A refusal says which it saw: write SQL, or a script or
+  stdin it cannot read for intent (pointing at `query` where the engine has
+  it). A simple command of a text program — `echo`, `printf`, and `git` or
+  `gh` with a subcommand that starts nothing named on the line (`commit`,
+  `issue`, …; never `git -c`, `--exec`, `gh alias`) — is cut to its name
+  before the client is looked for, unless it holds a substitution or its
+  output is piped on: a client named in a commit message or an issue title
+  is not run (pythia-mysql#2). It **allows** without a prompt one plain command of the
   engine that cannot write (a read, a preview, `approve --card`) and a
   confirm whose grant is valid on that connection. It **stays out** of
   everything else, so the client's own prompt decides: `approve`, `--yes`,
@@ -254,11 +281,19 @@ developer's terminal.
 - `install` scaffolds `connections.json` (mode 600, never rewritten), the
   `.gitignore` lines, the hooks and deny rules in
   `.claude/settings.local.json` (spelled with this interpreter's absolute
-  path, so a hook never fails to start for want of PATH), the marked
+  path, so a hook never fails to start for want of PATH, and in exec form —
+  `command` the interpreter, `args` the module and subcommand — so Claude
+  Code starts it with no shell: on Windows a shell-form hook ran through Git
+  Bash on every tool call; entries an earlier install wrote in shell form
+  are recognised and replaced), the marked
   instruction block in CLAUDE.md and AGENTS.md, and the engine's skills in
   `.claude/skills` and `.agents/skills`. A second run changes nothing.
-- `doctor` checks each of those and exits 1 on a fail; `skill lint` holds
-  SKILL.md files to pythia's skill contract.
+- `doctor` checks each of those and exits 1 on a fail. The session-start
+  hook stamps a fingerprint of the hooks it ran under, so doctor tells
+  "wired" from "active in the running session" and says when a restart is
+  due. `skill lint` holds SKILL.md files to pythia's skill contract, each
+  skill once however many homes keep a copy (the homes are named when the
+  copies differ); doctor gives a count and three names, not every finding.
 
 **The approval doors** (Phase 3b, `doors.py`). A grant is a person's
 Approve on pythia's own card for one token, and every door ends in
@@ -273,7 +308,16 @@ them in order, and moves to the next without asking when one fails:
    agent's own words, an answer the agent wrote into its call (read from the
    session transcript, since current Claude Code moves the person's answer
    into the tool input), a dialog that closed with nobody at the keyboard, a
-   typed reply, and no answer at all. The guard and a deny rule keep an
+   typed reply, and no answer at all. When the transcript cannot be read,
+   the refusal says why — no `transcript_path` in the payload, the file
+   could not be opened (with the errno; retried like a line not yet
+   written), or no matching call in the bytes scanned — and names
+   `CLAUDE_CODE_CHILD_SESSION` when it is set. `<PREFIX>_HOOK_DUMP=<dir>`
+   writes the raw payload and that reason to a file, and doctor shows the
+   last real outcome of the door, so a door that never mints is visible. A
+   client that cancels the hook (seen once in Claude Desktop) leaves no
+   verdict; the brief tells the agent that is the next door, not an
+   approval and not a reason to ask again. The guard and a deny rule keep an
    agent from piping a payload into `approve --hook` itself.
 2. **The MCP approver** (`mcp`, server `<command with _>`, tool
    `<server>_approve`). An elicitation shows the card; only an explicit

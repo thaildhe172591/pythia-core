@@ -23,7 +23,7 @@ sets out to forge.
 | Autopilot lease | a write landed unasked that the lease does not cover: another or a protected connection, a group or a destructive statement the card did not name, more than 1000 rows, a lease expired, spent, revoked, paused or never approved; a lease file written by hand (the guard) | what the developer approved: inside its scope, writes land without a per-write look — each is still journaled, verified and linted (a lint error is never landed under a lease), and breakage pauses the lease |
 | MCP door (elicitation) | a grant without an explicit Approve: a decline, a cancel, a client that declines for nobody in under 1.5 s, a prompt that could not be shown | a client that shows the prompt and accepts it without the person |
 | Read-only session | a read command that writes: the database itself refuses | dblink and foreign data wrappers |
-| PreToolUse guard (`hook pre-tool`) | an agent that follows its rules into a known way around the gate: the raw client given write SQL or a script — named anywhere in the command, so also behind `env`, `sudo`, `docker exec`, `ssh`, a pipe or `bash -c` (a script flag inside the quoted command too), an MCP SQL tool given write SQL, an engine's database MCP tool named for a write or given a writing command document (its keys are read, not only its strings), a grant written by hand, `grants.mint` or the console seam from a one-liner, the agent setting `<PREFIX>_CI`, reading `connections.json`, editing `policy.json` or the journal | a shell spelling no pattern lists (a variable, an alias, a script file that runs the client); the guard is a hook in the agent's client, and an agent with no hook wired has no guard — `doctor` says so |
+| PreToolUse guard (`hook pre-tool`) | an agent that follows its rules into a known way around the gate: the raw client given write SQL or a script — named anywhere in the command, so also behind `env`, `sudo`, `docker exec`, `ssh`, a pipe or `bash -c` (a script flag inside the quoted command too), an MCP SQL tool given write SQL, an engine's database MCP tool named for a write or given a writing command document (its keys are read, not only its strings), a grant written by hand, `grants.mint` or the console seam from a one-liner, the agent setting `<PREFIX>_CI`, reading `connections.json`, editing `policy.json` or the journal; an engine's driver opened in an inline script with write SQL (`driver_pattern`) | a shell spelling no pattern lists (a variable, an alias, a script file that runs the client, a driver script in a file); a client named in the text of `echo`, `printf`, `git commit`/`log`/…, `gh issue`/`pr`/… is not denied — a text program is exempt only by its bare name, with no `$(`, backtick or `<(` in it, its output not piped on, and never `git -c`/`--exec`/`--upload-pack` or `gh alias`; the guard is a hook in the agent's client, and an agent with no hook wired has no guard — `doctor` says so |
 | Deny rules (`install`) | Claude Code's own tools reading `connections.json` or editing the engine's folder, even with no hook running | the shell, which the rules do not cover |
 
 ## Honest limits
@@ -42,7 +42,12 @@ sets out to forge.
 - **A chat door trusts the client that draws it.** The hook reads the
   answer Claude Code hands it, and the elicitation the answer Codex returns.
   A client that answers for the person defeats both; the terminal door is
-  the one that needs no client at all.
+  the one that needs no client at all. A hook payload whose transcript
+  cannot be read still mints nothing: the refusal now names why, and
+  `<PREFIX>_HOOK_DUMP=<dir>` (off unless the developer sets it) writes that
+  payload — the question, the answer, the transcript path; no password — to
+  the folder they name. `chat-door.json` in the engine's folder records the
+  last outcome for doctor; it is a note, never read as a grant.
 - **The probe runs before approval.** An UPDATE or DELETE is approved on its
   row set, so its own table and predicate are queried before anyone
   approves. That text comes from the file about to run, so it opens no door
