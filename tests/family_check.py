@@ -45,10 +45,17 @@ def snapshot(root):
             if p.is_file() and ".git" not in p.parts}
 
 
+def _hook_text(h):
+    """A hook in either form as one line (pythia_core.install.hook_text,
+    which this script does not import: it drives the installed commands)."""
+    args = h.get("args")
+    return h["command"] if not args else " ".join([f'"{h["command"]}"', *args])
+
+
 def hooks_of(root):
     s = json.loads((pathlib.Path(root) / ".claude" / "settings.local.json")
                    .read_text(encoding="utf-8"))
-    return [(event, e.get("matcher"), h["command"])
+    return [(event, e.get("matcher"), _hook_text(h))
             for event, entries in s.get("hooks", {}).items() for e in entries
             for h in e.get("hooks", [])]
 

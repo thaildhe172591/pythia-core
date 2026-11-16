@@ -474,6 +474,9 @@ DO     writes only via `{run} apply <file>` (one statement) or `{run}
        `{run} approve --card <token>`, options Approve / Reject (Claude
        Code); the `{tool}` tool (MCP; Codex starts here);
        `{run} approve <token>` in the developer's terminal. Never mint it.
+       No verdict from {run} after the dialog closes (some clients cancel
+       the hook) is not an approval and not a reason to ask again: go to
+       the `{tool}` door.
        Then `{run} apply <file> --confirm <token>`. Evidence before done:
        `{run} errors`; NOT VERIFIED is said plainly. A lease the developer
        approved (`{run} autopilot request`) lands covered writes unasked:
@@ -540,7 +543,12 @@ def run_hook(engine, event, stdin=None):
         payload = {}
     try:
         if event == "session-start":
-            return session_brief(engine, payload)
+            text = session_brief(engine, payload)
+            from . import install       # lazily: install imports harness
+            cwd = pathlib.Path((payload or {}).get("cwd") or os.getcwd())
+            _, root = _project(engine, cwd)
+            install.stamp_session(engine, root)
+            return text
         if event == "pre-tool":
             out = pre_tool_decision(engine, payload)
             return json.dumps(out) + "\n" if out else ""

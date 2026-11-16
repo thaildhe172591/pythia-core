@@ -102,19 +102,27 @@ def _tool_input_in(raw, tool_use_id, asked):
     return None
 
 
-def transcript_tool_input(payload, asked, chunk=1 << 20, limit=64 << 20,
-                          retries=2, pause=0.25):
-    """What the model itself sent in this AskUserQuestion call, read from
-    the session transcript; None when it cannot be found. Current Claude
-    Code writes the person's answer into tool_input (and drops any answers
-    the model wrote before it shows the dialog), so tool_input alone cannot
-    say who answered; the transcript keeps the call as the model sent it.
-    Read from the end, where the call is; bounded, and retried briefly in
-    case the line is still being written."""
+CHILD_SESSION_NOTE = ("CLAUDE_CODE_CHILD_SESSION is set: a session started by "
+                      "another app may write no transcript, so the chat door "
+                      "cannot verify an answer here")
+
+
+def transcript_lookup(payload, asked, chunk=1 << 20, limit=64 << 20,
+                      retries=2, pause=0.25):
+    """(input, reason): what the model itself sent in this AskUserQuestion
+    call, read from the session transcript, or (None, why it was not found)
+    — no transcript_path in the payload, the file could not be opened (with
+    the errno), or no matching call in the bytes scanned. Current Claude Code
+    writes the person's answer into tool_input (and drops any answers the
+    model wrote before it shows the dialog), so tool_input alone cannot say
+    who answered; the transcript keeps the call as the model sent it. Read
+    from the end, where the call is; bounded, and retried briefly — on an
+    OSError as on a line not yet written."""
     path = payload.get("transcript_path")
     tid = payload.get("tool_use_id") if isinstance(payload.get("tool_use_id"), str) else None
     if not isinstance(path, str) or not path:
-        return None
+        return None, "the hook payload carried no transcript_path"
+    why = ""
     for attempt in range(retries + 1):
         try:
             with open(path, "rb") as f:
@@ -130,12 +138,64 @@ def transcript_tool_input(payload, asked, chunk=1 << 20, limit=64 << 20,
                     for raw in reversed(lines):
                         found = _tool_input_in(raw, tid, asked)
                         if found is not None:
-                            return found
-        except OSError:
-            return None
+                            return found, ""
+            what = f"tool_use_id {tid}" if tid else "these questions"
+            why = (f"no AskUserQuestion call with {what} in the last {read} bytes "
+                   f"of {path}")
+        except OSError as e:
+            why = (f"the transcript {path} could not be opened "
+                   f"(errno {e.errno}: {e.strerror})")
         if attempt < retries:
             time.sleep(pause)
-    return None
+    return None, f"{why} after {retries + 1} attempts"
+
+
+def transcript_tool_input(payload, asked, **kw):
+    """transcript_lookup without the reason."""
+    return transcript_lookup(payload, asked, **kw)[0]
+
+
+def _dump(engine, payload, reason):
+    """<PREFIX>_HOOK_DUMP=<dir>: the raw payload and why the transcript
+    lookup gave up, one file per hook run, to diagnose a door that never
+    mints. Off unless the developer sets it; never raises."""
+    import os
+    folder = os.environ.get(f"{engine.env_prefix}_HOOK_DUMP")
+    if not folder:
+        return
+    try:
+        import pathlib
+        d = pathlib.Path(folder)
+        d.mkdir(parents=True, exist_ok=True)
+        name = time.strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}.json"
+        (d / name).write_text(json.dumps({"payload": payload, "transcript": reason},
+                                         indent=2, default=str), encoding="utf-8")
+    except (OSError, TypeError, ValueError):
+        pass
+
+
+def _record(state, token, outcome, minted, detail=""):
+    """The last real chat-door outcome, for doctor: a door that never mints
+    must be visible somewhere but the agent's context."""
+    try:
+        import pathlib
+        path = pathlib.Path(state) / "chat-door.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "token": token, "minted": minted,
+                                    "outcome": outcome, "detail": detail}),
+                        encoding="utf-8")
+    except (OSError, TypeError):
+        pass
+
+
+def last_outcome(state):
+    try:
+        import pathlib
+        d = json.loads((pathlib.Path(state) / "chat-door.json").read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
 
 
 def names_another(engine, before):
@@ -169,7 +229,12 @@ def hook_approve(engine, state, payload):
     typed = str(resp.get("response") or "").strip()
     asked = [q.get("question", "") for q in (tin.get("questions") or [])
              if isinstance(q, dict)]
-    sent = transcript_tool_input(payload, asked) if in_input else None
+    sent, why = transcript_lookup(payload, asked) if in_input else (None, "")
+    if in_input and sent is None:
+        import os
+        if os.environ.get("CLAUDE_CODE_CHILD_SESSION"):
+            why = f"{why}; {CHILD_SESSION_NOTE}"
+        _dump(engine, payload, why)
     notes, seen = [], set()
     for question in list(answers) + [q for q in asked if q not in answers]:
         m = TOKEN_IN_QUESTION.search(str(question))
@@ -179,9 +244,12 @@ def hook_approve(engine, state, payload):
         if token in seen:
             continue
         seen.add(token)
-        notes.append(f"{token}: " + _one_answer(engine, state, payload, token,
-                                                question, answers, in_input,
-                                                sent, idle, typed))
+        note = _one_answer(engine, state, payload, token, question, answers,
+                           in_input, sent, idle, typed, why)
+        minted = note.startswith("approved in chat")
+        _record(state, token, note.split(" — ")[0] if minted else note, minted,
+                why if in_input and sent is None else "")
+        notes.append(f"{token}: " + note)
     if not notes:
         return None
     return {"hookSpecificOutput": {
@@ -190,15 +258,15 @@ def hook_approve(engine, state, payload):
 
 
 def _one_answer(engine, state, payload, token, question, answers, in_input,
-                sent, idle, typed):
+                sent, idle, typed, why=""):
     if idle:
         return (f"the dialog closed itself after {round(float(idle) / 1000)} s "
                 "with nobody at the keyboard — no one answered. No grant "
                 "minted. " + next_door_after_chat(engine, token))
     if in_input and sent is None:
         return ("the answer is in the tool input, and the session transcript "
-                "that shows whether you wrote it yourself could not be read — "
-                "so it cannot count. No grant minted. "
+                "that shows whether you wrote it yourself could not be read "
+                f"({why}) — so it cannot count. No grant minted. "
                 + next_door_after_chat(engine, token))
     if in_input and sent.get("answers"):
         return ("your own call carried answers — that is you choosing, not the "

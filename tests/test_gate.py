@@ -32,8 +32,10 @@ NEW = "create or replace function f_total() returns int as 'select 2'"
 
 @contextlib.contextmanager
 def project(engine):
+    # the session this suite runs in may itself be a child session: what the
+    # doors say about CLAUDE_CODE_CHILD_SESSION is set by a test, never by it
     keep_env = {k: os.environ.pop(k) for k in list(os.environ)
-                if k.startswith("PYTHIA_")}
+                if k.startswith("PYTHIA_") or k == "CLAUDE_CODE_CHILD_SESSION"}
     keep_cwd = os.getcwd()
     with tempfile.TemporaryDirectory() as td:
         root = pathlib.Path(td)
@@ -49,7 +51,8 @@ def project(engine):
             yield Project(engine, root)
         finally:
             os.chdir(keep_cwd)
-            for k in [k for k in os.environ if k.startswith("PYTHIA_")]:
+            for k in [k for k in os.environ if k.startswith("PYTHIA_")
+                      or k == "CLAUDE_CODE_CHILD_SESSION"]:
                 del os.environ[k]
             os.environ.update(keep_env)
             human.FORCE_CONSOLE = None

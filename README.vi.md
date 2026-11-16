@@ -34,7 +34,10 @@ Phần của pythia giống nhau ở mọi database. Các engine package xây tr
     thứ không ghi được), `hook session-start` (luật và trạng thái của
     project), `install` (khung connections, `.gitignore`, hook, MCP approver
     trong file riêng của máy này, khối hướng dẫn, skill — chạy lần hai không
-    đổi gì), `doctor` và `skill lint`.
+    đổi gì; hook ở dạng exec, nên không có shell nào khởi động cho chúng),
+    `doctor` (cả việc phiên đang chạy có khởi động dưới đúng bộ hook hiện tại
+    không, và kết quả thật gần nhất của cửa chat) và `skill lint` (mỗi skill
+    một lần, dù nằm ở bao nhiêu thư mục).
 
 Mỗi cổng chặn được gì, và không chặn được gì, có trong
 [SECURITY.md](SECURITY.md). Kế hoạch, và cách mỗi ý tưởng ánh xạ sang từng

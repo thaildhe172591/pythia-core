@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- **The chat door says why it could not trace an answer** (#1). The
+  transcript lookup now returns its reason with the miss — no
+  `transcript_path`, an `OSError` (with the errno, and retried like a line
+  not yet written), or no matching call in the bytes scanned — and the
+  refusal carries it, naming `CLAUDE_CODE_CHILD_SESSION` when that is set
+  (pythia-mysql#5). `<PREFIX>_HOOK_DUMP=<dir>` writes the raw PostToolUse
+  payload and the reason to a file. `doctor` shows the last real chat-door
+  outcome, and warns in a child session that the chat door cannot verify
+  answers there. A fixture shaped like a Claude Code 2.1.32x transcript
+  (`wireToolInputs`, `attachment` and `api-request-blob` lines) is read.
+- **No verdict is the next door** (#2, in part). The brief tells the agent
+  that no verdict from the answer hook after the dialog closes — a client
+  may cancel the hook, as seen once in Claude Desktop — is not an approval
+  and not a reason to ask again: it goes to the MCP door. Whether Desktop
+  cancels the hook still needs a reproduction with a real card.
+- **Hooks in exec form** (#4). `install` writes `command` = the interpreter
+  and `args` = the module and subcommand, so Claude Code starts the hook
+  with no shell — on Windows a shell-form hook started Git Bash for every
+  tool call, and a slow domain controller held each start past the hook's
+  timeout. Shell-form entries from earlier installs are recognised by
+  `install` (replaced, never duplicated) and by `doctor`. `hook_text(h)`
+  gives either form as one line. Needs a Claude Code that reads `args`
+  (2.1.32x and later).
+- **doctor: wired is not active** (pythia-mysql#8). The session-start hook
+  stamps a fingerprint of the hooks it started under; doctor's `hooks
+  active` row says whether a running session has them, and when to restart.
+- **skill lint: each skill once, and a count in doctor** (#3). A skill kept
+  in `.claude/skills` and `.agents/skills` is linted once (the homes are
+  named when the copies differ); doctor prints how many skills do not
+  follow the style and three names, and `skill lint` lists all.
 - **DESIGN settles question 7, MariaDB**: it is read and written by
   pythia-mysql, from 10.11 LTS; its views are read in their stored
   definitions and checked by `CHECK TABLE`; sequences are written, packages

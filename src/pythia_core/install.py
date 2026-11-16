@@ -38,12 +38,16 @@ PRE_TOOL_MATCHERS = ("Bash|Read|Edit|Write|MultiEdit|NotebookEdit", "mcp__.*")
 SKILL_HOMES = (pathlib.Path(".claude") / "skills", pathlib.Path(".agents") / "skills")
 
 
+def _interpreter():
+    return pathlib.Path(sys.executable).as_posix()
+
+
 def _launcher(engine):
-    exe = pathlib.Path(sys.executable).as_posix()
-    return f'"{exe}" -m {harness.module_of(engine)}'
+    return f'"{_interpreter()}" -m {harness.module_of(engine)}'
 
 
 def hook_command(engine, event):
+    """The hook as text, the way doctor shows it."""
     return f"{_launcher(engine)} hook {event}"
 
 
@@ -51,9 +55,33 @@ def answer_hook_command(engine):
     return f"{_launcher(engine)} approve --hook"
 
 
+def hook_entry(engine, *argv):
+    """One hook in exec form: Claude Code starts the interpreter itself, with
+    no shell. A shell-form hook is run through Git Bash on Windows, so every
+    tool call paid for a bash start and inherited its stalls (a slow domain
+    controller held each one 10-30 s, past the hook's timeout, and the guard
+    was skipped). Exec form needs no quoting and expands no $VAR."""
+    return {"type": "command", "command": _interpreter(),
+            "args": ["-m", harness.module_of(engine), *argv], "timeout": 15}
+
+
+def hook_text(h):
+    """A hook as one line of text, in either form: `command` alone (shell
+    form, earlier installs) or `command` plus `args` (exec form)."""
+    if not isinstance(h, dict):
+        return ""
+    cmd = str(h.get("command") or "")
+    args = h.get("args")
+    if not isinstance(args, list) or not args:
+        return cmd
+    head = f'"{cmd}"' if (" " in cmd and not cmd.startswith('"')) or args else cmd
+    return " ".join([head] + [shlex.quote(str(a)) for a in args])
+
+
 def _ours(engine, command):
-    """A hook this engine wrote, in any spelling: by what it runs."""
-    cmd = str(command)
+    """A hook this engine wrote, in any spelling: by what it runs. Takes the
+    text of a hook (hook_text), so both forms are recognised."""
+    cmd = hook_text(command) if isinstance(command, dict) else str(command)
     return bool(re.search(
         rf"(-m\s+{re.escape(harness.module_of(engine))}|"
         rf"{re.escape(engine.command)}(\.exe)?[\"']?)\s+(hook\s|approve\s+--hook\b)",
@@ -61,17 +89,17 @@ def _ours(engine, command):
 
 
 def wanted_hooks(engine):
-    def entry(command, matcher=None):
-        e = {"hooks": [{"type": "command", "command": command, "timeout": 15}]}
+    def entry(argv, matcher=None):
+        e = {"hooks": [hook_entry(engine, *argv)]}
         if matcher:
             e = {"matcher": matcher, **e}
         return e
-    return {"SessionStart": [entry(hook_command(engine, "session-start"))],
-            "PreToolUse": [entry(hook_command(engine, "pre-tool"), m)
+    return {"SessionStart": [entry(("hook", "session-start"))],
+            "PreToolUse": [entry(("hook", "pre-tool"), m)
                            for m in PRE_TOOL_MATCHERS],
             # the chat door; never "" or "*": a hook that catches every tool
             # makes AskUserQuestion return empty
-            "PostToolUse": [entry(answer_hook_command(engine), "AskUserQuestion")]}
+            "PostToolUse": [entry(("approve", "--hook"), "AskUserQuestion")]}
 
 
 def deny_rules(engine):
@@ -159,7 +187,7 @@ def merge_settings(engine, settings):
                 kept.append(entry)
                 continue
             inner = [h for h in entry.get("hooks") or []
-                     if not (isinstance(h, dict) and _ours(engine, h.get("command")))]
+                     if not (isinstance(h, dict) and _ours(engine, hook_text(h)))]
             if at is None and len(inner) != len(entry.get("hooks") or []):
                 at = len(kept)
             if inner:
@@ -386,8 +414,8 @@ def _hook_entries(engine, root):
                 if not isinstance(entry, dict):
                     continue
                 for h in entry.get("hooks") or []:
-                    if isinstance(h, dict) and _ours(engine, h.get("command")):
-                        found.append((event, entry.get("matcher"), h["command"]))
+                    if isinstance(h, dict) and _ours(engine, hook_text(h)):
+                        found.append((event, entry.get("matcher"), hook_text(h)))
     return found
 
 
@@ -442,10 +470,31 @@ def _chat_door(engine, root, hooks):
         return _check("warn", "chat door", f"cannot start: {mine[0]} — "
                       f"`{engine.command} install` respells it")
     broken = _breakers(root)
+    if os.environ.get("CLAUDE_CODE_CHILD_SESSION"):
+        _, tool = doors.mcp_names(engine)
+        broken.append(f"{doors.CHILD_SESSION_NOTE} — use the {tool} door")
     if broken:
         return _check("warn", "chat door", "; ".join(broken))
     return _check("ok", "chat door", "AskUserQuestion with the card, answered "
                   "through `approve --hook`")
+
+
+def _chat_door_last(engine, root):
+    """The last real outcome of the chat door, or None: a door wired
+    correctly that never mints is otherwise invisible to doctor."""
+    last = doors.last_outcome(state_dir(root, engine))
+    if not last:
+        return None
+    _, tool = doors.mcp_names(engine)
+    if last.get("minted"):
+        return _check("ok", "chat door last", f"{last.get('at')}: token "
+                      f"{last.get('token')} minted in chat")
+    detail = str(last.get("detail") or "")
+    return _check("warn", "chat door last",
+                  f"{last.get('at')}: token {last.get('token')} — no grant "
+                  "minted: " + (detail or str(last.get("outcome") or ""))[:300]
+                  + (f" — if this repeats, approvals go through {tool}"
+                     if detail else ""))
 
 
 def _mcp_door(engine, root, home=None):
@@ -518,6 +567,9 @@ def doctor(engine, root):
         else:
             out.append(_check("ok", f"hook {label}", shown))
     out.append(_chat_door(engine, root, hooks))
+    last = _chat_door_last(engine, root)
+    if last:
+        out.append(last)
     out.append(_mcp_door(engine, root))
     deny = []
     for path in _settings_files(root):
@@ -555,8 +607,64 @@ def doctor(engine, root):
                       "refreshes them" if stale else "the pack is installed"))
     team = sorted({p for home in SKILL_HOMES
                    for p in (root / home).glob("*/SKILL.md")})
-    broken = [f"{p.parent.name}: {skills.lint(p)[0]}" for p in team if skills.lint(p)]
+    broken = []
+    for name, path, differ in skills.unique(team):
+        if skills.lint(path):
+            order = [h.as_posix() for h in SKILL_HOMES]
+            rel = sorted((_rel(d, root) for d in differ or []),
+                         key=lambda r: order.index(r) if r in order else len(order))
+            broken.append(name + (f" ({' and '.join(rel)} differ)" if differ else ""))
     if broken:
-        out.append(_check("warn", "skill lint", "; ".join(broken)
+        # a count and a few names: a team's third-party packs rarely follow
+        # pythia's skill style, and a wall of findings buries every other row
+        out.append(_check("warn", "skill lint",
+                          f"{len(broken)} skill{'s' if len(broken) != 1 else ''} "
+                          "do not follow the pythia skill style, e.g. "
+                          + ", ".join(sorted(broken, key=lambda b: ("differ" not in b, b))[:3])
                           + f" — `{run} skill lint` lists all"))
+    out.append(_hooks_active(engine, root, hooks))
     return out
+
+
+# --- wired is not active: the session stamp ------------------------------------------
+
+def hooks_fingerprint(engine, root):
+    """A short hash of this engine's hook entries as the settings hold them."""
+    import hashlib
+    text = json.dumps(sorted(_hook_entries(engine, root), key=str))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def stamp_session(engine, root):
+    """Called by the session-start hook: the hooks it started under."""
+    try:
+        path = state_dir(root, engine) / "session-hooks.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        import time
+        path.write_text(json.dumps({"fingerprint": hooks_fingerprint(engine, root),
+                                    "at": time.strftime("%Y-%m-%d %H:%M:%S")}),
+                        encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _hooks_active(engine, root, hooks):
+    """Wired in settings is not active in a session that is already running:
+    Claude Code reads hooks when a session starts."""
+    if not hooks:
+        return _check("warn", "hooks active", "no hooks wired, so none is active")
+    try:
+        stamp = json.loads((state_dir(root, engine) / "session-hooks.json")
+                           .read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        stamp = None
+    if not isinstance(stamp, dict):
+        return _check("warn", "hooks active", "wired — they take effect in new "
+                      "agent sessions; no session has started under them yet, so "
+                      "restart any agent session already running")
+    if stamp.get("fingerprint") != hooks_fingerprint(engine, root):
+        return _check("warn", "hooks active", f"the hooks changed after the last "
+                      f"session started ({stamp.get('at')}) — a session running "
+                      "since then is guarded by the old ones, or none: restart it")
+    return _check("ok", "hooks active", f"the last session started under these "
+                  f"hooks ({stamp.get('at')})")

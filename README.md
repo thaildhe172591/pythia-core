@@ -35,8 +35,10 @@ build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres
     gate and waves through what cannot write), `hook session-start` (the
     rules and the project's state), `install` (connections scaffold,
     `.gitignore`, hooks, the MCP approver in this machine's own files,
-    instruction blocks, skills — a second run changes nothing), `doctor` and
-    `skill lint`.
+    instruction blocks, skills — a second run changes nothing; hooks in exec
+    form, so no shell starts for them), `doctor` (also whether a running
+    session started under the current hooks, and the chat door's last real
+    outcome) and `skill lint` (each skill once, however many homes hold it).
 
 What each gate stops, and what it does not, is in
 [SECURITY.md](https://github.com/thaildhe172591/pythia-core/blob/main/SECURITY.md). The plan, and how each idea maps to each

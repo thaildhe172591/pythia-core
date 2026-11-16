@@ -63,3 +63,25 @@ def files_of(skill):
     skill = pathlib.Path(skill)
     return sorted(p.relative_to(skill) for p in skill.rglob("*")
                   if p.is_file() and "__pycache__" not in p.parts)
+
+
+def unique(files):
+    """[(name, path, homes_that_differ)] — one entry per skill name. A
+    project that keeps the same skill in .claude/skills and .agents/skills
+    holds two copies of one skill, not two skills: linted once. When the
+    copies' bytes differ, the homes are named (homes_that_differ), and the
+    first copy stands for the skill."""
+    by_name = {}
+    for f in files:
+        f = pathlib.Path(f)
+        by_name.setdefault(f.parent.name, []).append(f)
+    out = []
+    for name, copies in by_name.items():
+        try:
+            datas = {c.read_bytes() for c in copies}
+        except OSError:
+            datas = {b""}
+        differ = ([c.parent.parent.as_posix() for c in copies]
+                  if len(datas) > 1 else None)
+        out.append((name, copies[0], differ))
+    return out

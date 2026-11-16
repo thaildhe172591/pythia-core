@@ -548,7 +548,8 @@ def cmd_skill(engine, ns):
             files.extend(sorted(t.glob("*/SKILL.md")))
     if not files:
         sys.exit("No SKILL.md found. Pass a skill folder or file.")
-    report = {str(f): skills.lint(f) for f in files}
+    # the same skill kept in two homes is linted once
+    report = {str(path): skills.lint(path) for _, path, _ in skills.unique(files)}
     bad = sum(1 for probs in report.values() if probs)
     if ns.json:
         print(json.dumps(report))

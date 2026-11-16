@@ -17,12 +17,14 @@ import fakes  # noqa: F401 — puts src/ on sys.path
 from fakes import FakeHarnessEngine
 
 from pythia_core import cli, grants, harness, skills  # noqa: E402
+from pythia_core import install as inst  # noqa: E402
 
 
 @contextlib.contextmanager
 def project(config=True):
     keep_env = {k: os.environ.pop(k) for k in list(os.environ)
-                if k.startswith("PYTHIA_") or k in ("HOME", "USERPROFILE")}
+                if k.startswith("PYTHIA_")
+                or k in ("HOME", "USERPROFILE", "CLAUDE_CODE_CHILD_SESSION")}
     keep_cwd = os.getcwd()
     with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
         # install registers the approver in the home folder: never the real one
@@ -41,7 +43,7 @@ def project(config=True):
             yield root
         finally:
             os.chdir(keep_cwd)
-            for k in ("HOME", "USERPROFILE"):
+            for k in ("HOME", "USERPROFILE", "CLAUDE_CODE_CHILD_SESSION"):
                 os.environ.pop(k, None)
             os.environ.update(keep_env)
 
@@ -384,7 +386,8 @@ def test_install_wires_everything_and_leaves_what_is_not_its_own():
         settings = json.loads((root / ".claude" / "settings.local.json").read_text(encoding="utf-8")) \
             if (root / ".claude" / "settings.local.json").is_file() else \
             json.loads((root / ".claude" / "settings.json").read_text(encoding="utf-8"))
-        hooks = json.dumps(settings["hooks"])
+        hooks = " ".join(inst.hook_text(h) for es in settings["hooks"].values()
+                         for e in es for h in e["hooks"])
         assert "hook pre-tool" in hooks and "hook session-start" in hooks
         assert "Read(./.pythia/fake/connections.json)" in settings["permissions"]["deny"]
         claude = (root / "CLAUDE.md").read_text(encoding="utf-8")
@@ -423,7 +426,8 @@ def test_install_keeps_every_hook_and_setting_that_is_not_its_own():
         assert s["permissions"]["deny"][0] == "Read(./secrets/**)"
         assert s["hooks"]["PreToolUse"][0] == {"matcher": "Bash", "hooks": [oracle]}
         assert s["hooks"]["Stop"][0]["hooks"][0]["command"] == "notify"
-        assert sum("hook pre-tool" in json.dumps(e) for e in s["hooks"]["PreToolUse"]) == 3
+        assert sum("hook pre-tool" in inst.hook_text(h) for e in s["hooks"]["PreToolUse"]
+                   for h in e["hooks"]) == 3
         broken = root / ".claude" / "settings.local.json"
         broken.write_text("{ not json", encoding="utf-8")
         code, printed = install(root)
@@ -469,6 +473,113 @@ def test_skill_lint_holds_the_contract():
         for needle in ("must match the folder", "unquoted ': '", "Use when",
                        "max 150", "Phase:", "reference/missing.md"):
             assert needle in found, needle
+
+
+# --- doctor's skill lint: once per skill, a count not a wall (pythia-core#3) -------------
+
+def _team_skill(root, home, name, body="no frontmatter\n"):
+    d = root / home / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(body, encoding="utf-8")
+
+
+def test_doctor_lints_each_team_skill_once_and_counts_them():
+    with project() as root:
+        install(root)
+        names = [f"bmad-{i:02d}" for i in range(12)]
+        for n in names:
+            for home in (".claude/skills", ".agents/skills"):
+                _team_skill(root, home, n)           # a copy in each home, same bytes
+        _team_skill(root, ".claude/skills", "differs", "a\n")
+        _team_skill(root, ".agents/skills", "differs", "b\n")
+        code, doc = doctor(root)
+        row = {c["what"]: c for c in doc["checks"]}["skill lint"]
+        assert row["status"] == "warn"
+        assert row["detail"].startswith("13 skills do not follow the pythia skill style")
+        assert len(row["detail"]) < 400, row["detail"]
+        assert row["detail"].count("bmad-00") == 1
+        assert "`pythia-fake skill lint` lists all" in row["detail"]
+        # the copies that differ are named with their homes
+        assert "differs (.claude/skills and .agents/skills differ)" in row["detail"]
+
+
+def test_skill_lint_reports_identical_copies_once():
+    with project() as root:
+        for home in (".claude/skills", ".agents/skills"):
+            _team_skill(root, home, "mine")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = cli.main(FakeHarnessEngine(), ["skill", "lint"])
+        assert code == 1
+        assert out.getvalue().count("FAIL") == 1, out.getvalue()
+
+
+# --- hooks in exec form (pythia-core#4) ------------------------------------------------------
+
+def test_install_writes_hooks_in_exec_form_with_no_shell():
+    """A shell-form hook starts Git Bash on Windows for every tool call, and
+    inherits its stalls; exec form starts the interpreter directly."""
+    from pythia_core import install as inst
+    with project(config=False) as root:
+        install(root)
+        s = json.loads((root / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+        ours = [h for entries in s["hooks"].values() for e in entries for h in e["hooks"]]
+        assert len(ours) == 4
+        for h in ours:
+            assert h["command"] == pathlib.Path(sys.executable).as_posix(), h
+            assert h["args"][:2] == ["-m", "fakes"], h
+            assert h["args"][2:] in (["hook", "session-start"], ["hook", "pre-tool"],
+                                     ["approve", "--hook"]), h
+            assert inst._ours(FakeHarnessEngine(), inst.hook_text(h))
+
+
+def test_install_replaces_an_old_shell_form_entry_and_doctor_still_passes():
+    with project() as root:
+        local = root / ".claude" / "settings.local.json"
+        local.parent.mkdir()
+        exe = pathlib.Path(sys.executable).as_posix()
+        old = lambda ev: {"type": "command", "command": f'"{exe}" -m fakes hook {ev}',
+                          "timeout": 15}
+        local.write_text(json.dumps({"hooks": {
+            "SessionStart": [{"hooks": [old("session-start")]}],
+            "PreToolUse": [{"matcher": "Bash|Read|Edit|Write|MultiEdit|NotebookEdit",
+                            "hooks": [old("pre-tool")]}],
+            "PostToolUse": [{"matcher": "AskUserQuestion", "hooks": [
+                {"type": "command", "command": f'"{exe}" -m fakes approve --hook'}]}]}}),
+            encoding="utf-8")
+        code, doc = doctor(root)            # the old spelling is still recognised
+        rows = {c["what"]: c for c in doc["checks"]}
+        assert rows["hook session-start"]["status"] == "ok", rows
+        assert rows["chat door"]["status"] == "ok", rows
+        install(root)
+        s = json.loads(local.read_text(encoding="utf-8"))
+        for event, n in (("SessionStart", 1), ("PreToolUse", 2), ("PostToolUse", 1)):
+            hs = [h for e in s["hooks"][event] for h in e["hooks"]]
+            assert len(hs) == n and all("args" in h for h in hs), (event, hs)
+        code, doc = doctor(root)
+        bad = [c for c in doc["checks"] if c["status"] == "fail"]
+        assert code == 0 and not bad, bad
+
+
+# --- doctor: wired is not active (pythia-mysql#8) ------------------------------------------
+
+def test_doctor_says_hooks_changed_since_the_session_started():
+    """The session-start hook stamps the hook configuration it ran under;
+    doctor compares, so "wired" is never read as "guarding this session"."""
+    with project() as root:
+        install(root)
+        code, doc = doctor(root)
+        row = {c["what"]: c for c in doc["checks"]}["hooks active"]
+        assert row["status"] == "warn" and "new agent sessions" in row["detail"]
+        run_hook("session-start", {"cwd": str(root)})
+        row = {c["what"]: c for c in doctor(root)[1]["checks"]}["hooks active"]
+        assert row["status"] == "ok", row
+        local = root / ".claude" / "settings.local.json"
+        s = json.loads(local.read_text(encoding="utf-8"))
+        s["hooks"]["PreToolUse"] = s["hooks"]["PreToolUse"][:1]
+        local.write_text(json.dumps(s), encoding="utf-8")
+        row = {c["what"]: c for c in doctor(root)[1]["checks"]}["hooks active"]
+        assert row["status"] == "warn" and "restart" in row["detail"], row
 
 
 def main():

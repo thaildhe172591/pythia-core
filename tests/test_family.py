@@ -130,7 +130,7 @@ def snapshot(root):
 
 def hook_commands(root):
     s = json.loads((root / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
-    return [(event, entry.get("matcher"), h["command"])
+    return [(event, entry.get("matcher"), install.hook_text(h))
             for event, entries in s["hooks"].items() for entry in entries
             for h in entry["hooks"]], s
 

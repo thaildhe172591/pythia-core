@@ -42,7 +42,12 @@ sets out to forge.
 - **A chat door trusts the client that draws it.** The hook reads the
   answer Claude Code hands it, and the elicitation the answer Codex returns.
   A client that answers for the person defeats both; the terminal door is
-  the one that needs no client at all.
+  the one that needs no client at all. A hook payload whose transcript
+  cannot be read still mints nothing: the refusal now names why, and
+  `<PREFIX>_HOOK_DUMP=<dir>` (off unless the developer sets it) writes that
+  payload — the question, the answer, the transcript path; no password — to
+  the folder they name. `chat-door.json` in the engine's folder records the
+  last outcome for doctor; it is a note, never read as a grant.
 - **The probe runs before approval.** An UPDATE or DELETE is approved on its
   row set, so its own table and predicate are queried before anyone
   approves. That text comes from the file about to run, so it opens no door

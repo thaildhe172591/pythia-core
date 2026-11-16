@@ -254,11 +254,19 @@ developer's terminal.
 - `install` scaffolds `connections.json` (mode 600, never rewritten), the
   `.gitignore` lines, the hooks and deny rules in
   `.claude/settings.local.json` (spelled with this interpreter's absolute
-  path, so a hook never fails to start for want of PATH), the marked
+  path, so a hook never fails to start for want of PATH, and in exec form —
+  `command` the interpreter, `args` the module and subcommand — so Claude
+  Code starts it with no shell: on Windows a shell-form hook ran through Git
+  Bash on every tool call; entries an earlier install wrote in shell form
+  are recognised and replaced), the marked
   instruction block in CLAUDE.md and AGENTS.md, and the engine's skills in
   `.claude/skills` and `.agents/skills`. A second run changes nothing.
-- `doctor` checks each of those and exits 1 on a fail; `skill lint` holds
-  SKILL.md files to pythia's skill contract.
+- `doctor` checks each of those and exits 1 on a fail. The session-start
+  hook stamps a fingerprint of the hooks it ran under, so doctor tells
+  "wired" from "active in the running session" and says when a restart is
+  due. `skill lint` holds SKILL.md files to pythia's skill contract, each
+  skill once however many homes keep a copy (the homes are named when the
+  copies differ); doctor gives a count and three names, not every finding.
 
 **The approval doors** (Phase 3b, `doors.py`). A grant is a person's
 Approve on pythia's own card for one token, and every door ends in
@@ -273,7 +281,16 @@ them in order, and moves to the next without asking when one fails:
    agent's own words, an answer the agent wrote into its call (read from the
    session transcript, since current Claude Code moves the person's answer
    into the tool input), a dialog that closed with nobody at the keyboard, a
-   typed reply, and no answer at all. The guard and a deny rule keep an
+   typed reply, and no answer at all. When the transcript cannot be read,
+   the refusal says why — no `transcript_path` in the payload, the file
+   could not be opened (with the errno; retried like a line not yet
+   written), or no matching call in the bytes scanned — and names
+   `CLAUDE_CODE_CHILD_SESSION` when it is set. `<PREFIX>_HOOK_DUMP=<dir>`
+   writes the raw payload and that reason to a file, and doctor shows the
+   last real outcome of the door, so a door that never mints is visible. A
+   client that cancels the hook (seen once in Claude Desktop) leaves no
+   verdict; the brief tells the agent that is the next door, not an
+   approval and not a reason to ask again. The guard and a deny rule keep an
    agent from piping a payload into `approve --hook` itself.
 2. **The MCP approver** (`mcp`, server `<command with _>`, tool
    `<server>_approve`). An elicitation shows the card; only an explicit
