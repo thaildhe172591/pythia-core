@@ -13,8 +13,14 @@ Phần của pythia giống nhau ở mọi database. Các engine package xây tr
 - chọn connection riêng cho từng engine;
 - lint cho query contract;
 - các lệnh mà command line của mọi engine đều thừa hưởng:
-  - `version`, `connections` và `check` (nói rõ khi server cũ hơn phiên bản
-    tối thiểu của engine);
+  - `version`, `connections` (`list`, và `test [NAME]`; `add NAME --set
+    key=value` và `remove NAME` ở console của dev, mật khẩu được hỏi riêng)
+    và `check` (nói rõ khi server cũ hơn phiên bản tối thiểu của engine, và
+    thêm các dòng trạng thái của engine: phiên là ai, TLS, số connection còn
+    trống);
+  - `query "SELECT ..."` (hoặc `-f FILE`, `--redact COL`), với engine có
+    query tier: một câu lệnh chỉ đọc, trong phiên chỉ đọc, các dòng có phân
+    trang;
   - các lệnh đọc `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact` và
     `errors`, có phân trang và không bao giờ cắt bớt mà không báo;
   - cổng ghi: `apply` (snapshot, rehearse trong một transaction rồi
@@ -31,7 +37,8 @@ Phần của pythia giống nhau ở mọi database. Các engine package xây tr
   - `lint <files>` (và `lint --rules`): rule của engine cùng severity và
     quy ước đặt tên của team trên một thay đổi, hiện trong mọi preview;
   - harness: `hook pre-tool` (guard chặn các đường vòng qua cổng và cho qua
-    thứ không ghi được), `hook session-start` (luật và trạng thái của
+    thứ không ghi được — tên client chỉ nằm trong phần chữ của `echo`,
+    `printf`, `git commit` hay `gh issue` không bị coi là client đang chạy), `hook session-start` (luật và trạng thái của
     project), `install` (khung connections, `.gitignore`, hook, MCP approver
     trong file riêng của máy này, khối hướng dẫn, skill — chạy lần hai không
     đổi gì; hook ở dạng exec, nên không có shell nào khởi động cho chúng),

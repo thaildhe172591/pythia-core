@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **`query`, a read the guard waves through** (pythia-mysql#1). A new
+  query tier (`query_refusal`, `run_query`): `query "SELECT ..."` or `-f
+  FILE` runs one statement the engine accepts as a read, refused before a
+  connection opens otherwise, in the read-only session, rows windowed and
+  every cut announced, `--redact COL` for personal data.
+- **`connections add | remove | test`** (pythia-mysql#6). `add NAME --set
+  key=value` writes an entry typed by the template, the password prompted
+  for and never an argument, the file written whole with mode 600; `add`
+  and `remove` are the developer's, at a console. `test [NAME]` connects
+  read-only and says what answered. The guard reads `list` and `test` as
+  reads.
+- **`check` adds the engine's status rows** (pythia-mysql#3): an optional
+  `status(conn)` gives `(item, value, warning)` rows — the session's user
+  and grants, TLS, connection headroom — each warning a `!` line, and
+  `warnings` under `--json`.
+- **The guard denies a driver in an inline script** (pythia-mysql#7): an
+  optional `driver_pattern()`, denied when the same command holds write
+  SQL. SECURITY says what it cannot see: a driver script in a file.
+- **A client named in text is not run** (pythia-mysql#2). `echo`,
+  `printf`, and `git`/`gh` with a subcommand that starts nothing named on
+  the line are cut to their name before the client is looked for — unless
+  a substitution is in them or their output is piped on. Every other
+  program naming the client is denied as before, and the refusal now says
+  whether it saw write SQL or a script/stdin it cannot read for intent.
+
 - **The chat door says why it could not trace an answer** (#1). The
   transcript lookup now returns its reason with the miss — no
   `transcript_path`, an `OSError` (with the errno, and retried like a line

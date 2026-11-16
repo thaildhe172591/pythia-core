@@ -13,8 +13,14 @@ build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres
 - per-engine connection resolution;
 - the query-contract lint;
 - the commands every engine's command line inherits:
-  - `version`, `connections` and `check` (which says when the server is
-    older than the engine's floor);
+  - `version`, `connections` (`list`, and `test [NAME]`; `add NAME --set
+    key=value` and `remove NAME` at the developer's console, the password
+    prompted for) and `check` (which says when the server is older than the
+    engine's floor, and adds the engine's own status rows: who the session
+    is, TLS, connection headroom);
+  - `query "SELECT ..."` (or `-f FILE`, `--redact COL`), for an engine with
+    the query tier: one statement that only reads, in the read-only
+    session, its rows windowed;
   - the read commands `ls`, `src`, `cols`, `ddl`, `grep`, `deps`, `impact`
     and `errors`, windowed and never truncated silently;
   - the write gate: `apply` (snapshot, rehearse inside a transaction and
@@ -32,7 +38,9 @@ build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres
   - `lint <files>` (and `lint --rules`): the engine's rules and the team's
     severities and naming patterns over a change, shown in every preview;
   - the harness: `hook pre-tool` (the guard that denies the ways around the
-    gate and waves through what cannot write), `hook session-start` (the
+    gate and waves through what cannot write — a client named only in the
+    text of `echo`, `printf`, `git commit` or `gh issue` is not taken for
+    one that runs), `hook session-start` (the
     rules and the project's state), `install` (connections scaffold,
     `.gitignore`, hooks, the MCP approver in this machine's own files,
     instruction blocks, skills — a second run changes nothing; hooks in exec

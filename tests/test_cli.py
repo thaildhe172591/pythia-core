@@ -171,6 +171,146 @@ def test_no_connection_names_this_engines_folder():
             os.chdir(keep)
 
 
+# --- query: rows, read-only (pythia-mysql#1) ------------------------------------------
+
+class QueryEngine(FakeEngine):
+    """The query tier: refuses what is not a read, answers a scripted table."""
+    ROWS = [(i, f"n{i}") for i in range(1, 8)]
+
+    def query_refusal(self, sql):
+        return None if sql.lower().startswith("select") else "only SELECT is a read"
+
+    def run_query(self, conn, schema, sql, fetch):
+        self.calls.append(("run_query", sql, fetch))
+        return ("ID", "NAME"), self.ROWS[:fetch]
+
+
+def test_query_reads_rows_in_a_readonly_session_and_announces_truncation():
+    e = QueryEngine()
+    with project(DEV):
+        code, out, err = run(e, "query", "select id, name from t_order", "--limit", "3")
+    assert code == 0 and out.splitlines()[0] == "ID\tNAME"
+    assert "1\tn1" in out and "4\tn4" not in out
+    assert "-- truncated at 3 rows" in out
+    assert e.conn.readonly is True and e.conn.closed is True
+    assert ("run_query", "select id, name from t_order", 4) in e.calls
+    with project(DEV):
+        code, out, _ = run(QueryEngine(), "query", "select 1", "--json", "--limit", "0")
+    doc = json.loads(out)
+    assert doc["command"] == "query" and len(doc["rows"]) == 7 and not doc["truncated"]
+
+
+def test_query_refuses_what_is_not_a_read_before_connecting():
+    e = QueryEngine()
+    with project(DEV):
+        msg = expect_exit(lambda: run(e, "query", "delete from t_order"),
+                          "only SELECT is a read", "pythia-fake apply")
+    assert "connect" not in e.calls, msg
+    with project(DEV):                    # an engine without the tier is refused by name
+        expect_exit(lambda: run(FakeEngine(), "query", "select 1"), "query tier")
+
+
+def test_query_reads_a_file_and_redacts_columns():
+    with project(DEV) as root:
+        (root / "q.sql").write_text("select id, name from t_order\n", encoding="utf-8")
+        code, out, _ = run(QueryEngine(), "query", "-f", "q.sql", "--redact", "name")
+    assert code == 0 and "n1" not in out and "1\t***" in out
+
+
+def test_the_guard_waves_a_query_through_as_a_read():
+    from pythia_core import harness
+    kind, _ = harness.classify_argv(QueryEngine(), ["query", "select 1"])
+    assert kind == "read"
+
+
+# --- check: the engine's own status lines (pythia-mysql#7) ----------------------------
+
+def test_check_adds_the_engines_status_lines():
+    class Status(FakeEngine):
+        def status(self, conn):
+            return [("user", "app_agent@%", None),
+                    ("tls", "none", "this session is not encrypted")]
+    with project(DEV):
+        code, out, _ = run(Status(), "check")
+    assert code == 0 and "user" in out and "app_agent@%" in out
+    assert "! tls: this session is not encrypted" in out
+    with project(DEV):
+        _, out, _ = run(Status(), "check", "--json")
+    doc = json.loads(out)
+    assert {"ITEM": "tls", "VALUE": "none"} in doc["rows"]
+    assert doc["warnings"] == ["tls: this session is not encrypted"]
+
+
+# --- connections add / remove / test (pythia-mysql#6) ---------------------------------
+
+class ConfigEngine(FakeEngine):
+    def connections_template(self):
+        return {"default": "dev", "dev": {"host": "", "port": 5432, "dbname": "app",
+                                          "user": "", "password": "", "tls": "request"}}
+
+
+def _console(on):
+    from pythia_core import human
+    human.FORCE_CONSOLE = on
+
+
+def test_connections_add_writes_the_entry_never_echoing_the_secret():
+    import getpass
+    keep = getpass.getpass
+    getpass.getpass = lambda prompt="": "t0p-secret"
+    _console(True)
+    try:
+        with project(DEV) as root:
+            code, out, err = run(ConfigEngine(), "connections", "add", "uat",
+                                 "--set", "host=db.example.test", "--set", "port=33062",
+                                 "--set", "user=app_agent", "--default")
+            assert code == 0, err
+            assert "t0p-secret" not in out + err
+            path = root / ".pythia" / "fake" / "connections.json"
+            cfg = json.loads(path.read_text(encoding="utf-8"))
+            assert cfg["uat"] == {"host": "db.example.test", "port": 33062,
+                                  "user": "app_agent", "password": "t0p-secret"}
+            assert cfg["default"] == "uat" and cfg["dev"] == DEV["dev"]
+            if os.name == "posix":
+                assert path.stat().st_mode & 0o777 == 0o600
+            msg = expect_exit(lambda: run(ConfigEngine(), "connections", "add", "x",
+                                          "--set", "hots=typo"), "hots", "host")
+            assert msg
+            expect_exit(lambda: run(ConfigEngine(), "connections", "add", "uat",
+                                    "--set", "host=h"), "already", "remove")
+            code, out, _ = run(ConfigEngine(), "connections", "remove", "uat")
+            cfg = json.loads(path.read_text(encoding="utf-8"))
+            assert code == 0 and "uat" not in cfg and "default" not in cfg
+    finally:
+        getpass.getpass = keep
+        _console(None)
+
+
+def test_connections_add_and_remove_are_the_developers_at_a_console():
+    _console(False)
+    try:
+        with project(DEV) as root:
+            before = (root / ".pythia" / "fake" / "connections.json").read_bytes()
+            for argv in (("add", "uat", "--set", "host=h"), ("remove", "dev")):
+                expect_exit(lambda: run(ConfigEngine(), "connections", *argv),
+                            "console")
+            assert (root / ".pythia" / "fake" / "connections.json").read_bytes() == before
+        from pythia_core import harness
+        assert harness.classify_argv(ConfigEngine(), ["connections", "add", "x"])[0] == "other"
+        assert harness.classify_argv(ConfigEngine(), ["connections", "test"])[0] == "read"
+    finally:
+        _console(None)
+
+
+def test_connections_test_connects_and_names_the_failure():
+    with project(DEV):
+        code, out, _ = run(FakeEngine(), "connections", "test")
+    assert code == 0 and "dev" in out and "FakeDB 1.0" in out
+    with project(DEV):
+        code, out, _ = run(FakeEngine(fail="timed out"), "connections", "test", "dev")
+    assert code == 1 and "could not reach 'dev': timed out" in out
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

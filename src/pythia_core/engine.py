@@ -133,10 +133,28 @@ HARNESS = (
 #   mcp_write_tool_pattern()  regex over the tool's own name: those of the
 #                             database's tools that write by name alone
 #                             (MongoDB's insert-many, drop-collection)
+#   driver_pattern()          regex naming the database's drivers as code
+#                             opens them (pymysql.connect): a command naming
+#                             one together with write SQL — an inline
+#                             `python -c`, a heredoc — is denied
 #   rollback_notes            {group: whether rollback is real}, for `policy`
 #   floor_warning(conn)       None, or why this server is older than any
 #                             version the engine is tested on: `check` says
 #                             it, and nothing is refused
+#   status(conn)              [(item, value, warning or None)]: what `check`
+#                             adds about the session — who it is, whether it
+#                             is encrypted, headroom; a warning is said with !
+
+QUERY = (
+    # Settled for pythia-mysql#1: rows, read-only. The developer's own SELECT,
+    # in the read-only session every read runs in, rolled back when the
+    # command ends; the engine refuses anything that is not a read before a
+    # connection opens — two lines of defence, as for the read commands.
+    "query_refusal",    # (sql) -> None when the text is one statement that
+                        #    only reads, else why it is refused
+    "run_query",        # (conn, schema, sql, fetch) -> (cols, rows), at most
+                        #    `fetch` rows
+)
 
 RELEASE = (
     # Settled in Phase 3c: what deploy needs beyond the write tier.
@@ -152,7 +170,7 @@ LINT = (
 )
 
 TIERS = {"connect": CONNECT, "read": READ, "write": WRITE, "predict": PREDICT,
-         "harness": HARNESS, "release": RELEASE, "lint": LINT}
+         "harness": HARNESS, "release": RELEASE, "lint": LINT, "query": QUERY}
 
 BIND_STYLES = ("named", "pyformat", "document")
 

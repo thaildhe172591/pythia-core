@@ -582,6 +582,87 @@ def test_doctor_says_hooks_changed_since_the_session_started():
         assert row["status"] == "warn" and "restart" in row["detail"], row
 
 
+# --- a driver in an inline script (pythia-mysql#3) -----------------------------------------
+
+class DriverEngine(FakeHarnessEngine):
+    def driver_pattern(self):
+        return r"\bfakedriver\s*\.\s*connect\b"
+
+
+def decide(engine, root, command):
+    return harness.pre_tool_decision(engine, {
+        "tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(root)})
+
+
+def test_the_guard_denies_a_driver_write_in_an_inline_script():
+    """The guard knew only the client: a driver one-liner wrote around it."""
+    with project() as root:
+        e = DriverEngine()
+        for cmd in ('python -c "import fakedriver; c = fakedriver.connect(host=1); '
+                    "c.cursor().execute('DELETE FROM t'); c.commit()\"",
+                    "python3 - <<'PY'\nimport fakedriver\nfakedriver.connect().cursor()"
+                    ".execute('drop table t')\nPY"):
+            d = decide(e, root, cmd)
+            assert d and d["hookSpecificOutput"]["permissionDecision"] == "deny", cmd
+            reason = d["hookSpecificOutput"]["permissionDecisionReason"]
+            assert "driver" in reason and "least-privilege" in reason
+        # a read through the driver, or the driver named with no write: left alone
+        assert decide(e, root, 'python -c "import fakedriver; '
+                               "fakedriver.connect().cursor().execute('select 1')\"") is None
+        assert decide(e, root, "pip show fakedriver") is None
+        # an engine that names no driver changes nothing
+        assert decide(FakeHarnessEngine(), root, 'python -c "import fakedriver; '
+                      "fakedriver.connect().cursor().execute('DELETE FROM t')\"") is None
+
+
+# --- a client named only inside a text argument (pythia-mysql#2) ---------------------------
+
+def test_a_client_named_inside_echo_git_or_gh_text_runs_nothing():
+    """echo, printf, git and gh take their arguments as text: a client named
+    there is not run, so it is not denied — issue titles, commit messages."""
+    with project() as root:
+        for cmd in ('git commit -m "docs: fakesql -c \'drop table t\' is refused"',
+                    'gh issue create --title "guard: fakesql -f x.sql passes" --body "x"',
+                    "echo 'run: fakesql -c \"delete from t\"'",
+                    "printf '%s\\n' 'fakesql < dump.sql'",
+                    'git add . && git commit -m "fakesql -f release.sql"'):
+            assert bash(root, cmd) is None, cmd
+
+
+def test_text_programs_never_hide_a_client_that_runs():
+    """What a shell would still run is denied as before: a pipe into the
+    client, a substitution, a second command, git subcommands that run one,
+    and any program the list does not name."""
+    with project() as root:
+        for cmd in ("echo 'delete from t' | fakesql",
+                    "printf 'drop table t' | fakesql app",
+                    'echo "$(fakesql -c \'drop table t\')"',
+                    "echo `fakesql -f x.sql`",
+                    "echo ok; fakesql -f x.sql",
+                    "git commit -m x && fakesql -c 'drop table t'",
+                    "git rebase --exec \"fakesql -c 'drop table t'\" HEAD~1",
+                    "git -c core.pager='fakesql -f x.sql' log",
+                    "gh alias set q 'fakesql -c \"drop table t\"' --shell",
+                    'hc send t1 "fakesql -c \'drop table t\'"',
+                    "sudo echo x; fakesql -f x.sql",
+                    "echo t | xargs fakesql -c 'drop table t'",
+                    'git commit -m "$(fakesql -c \'drop table t\')"',
+                    "(echo x) && fakesql -c 'drop table t'",
+                    "./echo 'fakesql -c \"drop table t\"'",
+                    "echo \"unclosed fakesql -c 'drop table t'"):
+            assert verdict(bash(root, cmd)) == "deny", cmd
+
+
+def test_the_reason_says_script_or_write():
+    with project() as root:
+        why = bash(root, "fakesql app < dump.sql")["hookSpecificOutput"][
+            "permissionDecisionReason"]
+        assert "script or stdin" in why and "pythia-fake apply" in why
+        why = bash(root, "fakesql -c 'drop table t'")["hookSpecificOutput"][
+            "permissionDecisionReason"]
+        assert why.startswith("Writes go through")
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

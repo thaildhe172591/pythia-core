@@ -145,6 +145,9 @@ def classify_argv(engine, argv):
     sub = ns.command
     if getattr(ns, "yes", False):
         return "other", ns            # the developer's flag, at a console
+    if sub == "connections":
+        # add and remove change where commands connect: the developer's
+        return ("read" if ns.action in ("list", "test") else "other"), ns
     if sub in READ_COMMANDS:
         return "read", ns
     if sub == "approve":
@@ -167,7 +170,8 @@ def classify_argv(engine, argv):
 
 
 READ_COMMANDS = ("version", "connections", "check", "ls", "src", "cols", "ddl",
-                 "grep", "deps", "impact", "errors", "history", "doctor", "lint")
+                 "grep", "deps", "impact", "errors", "history", "doctor", "lint",
+                 "query")
 
 
 # --- what the guard protects -----------------------------------------------------------
@@ -233,6 +237,22 @@ def _reasons(engine):
                 f"{engine.label} client here would write with none of them. "
                 f"If the developer wants to run it by hand, hand them the file "
                 f"and the restore from `{run} history`."),
+        "raw_script": (f"The raw {engine.label} client here reads a script or "
+                       "stdin, which the hook cannot read for intent — it "
+                       "may write with no snapshot, rehearsal, approval or "
+                       f"journal. Writes go through `{run} apply <file>` "
+                       f"(one statement) or `{run} deploy <files>`"
+                       + (f"; rows are read with `{run} query \"SELECT ...\"`"
+                          if hasattr(engine, "run_query") else "")
+                       + ". If the developer wants to run the script by hand, "
+                       "hand them the file."),
+        "driver": (f"This opens {engine.label}'s driver in an inline script and "
+                   "hands it write SQL: a write with no snapshot, rehearsal, "
+                   f"approval or journal. Writes go through `{run} apply <file>` "
+                   f"or `{run} deploy <files>`. The hook only sees what is "
+                   "spelled in the command — a script file it cannot read — so "
+                   "the real line is a least-privilege account for the agent "
+                   "(reads only); ask the developer before anything else."),
         "mcp": (f"Writes go through `{run} apply <file>` (one statement): "
                 "snapshot, rehearsal, preview, approval, journal. This "
                 f"{engine.label} MCP tool would write with none of them; it is "
@@ -308,20 +328,119 @@ def quoted_commands(command):
         yield from quoted_commands(inner)
 
 
-def raw_write(engine, command):
-    """The client with write SQL anywhere in the command (it is usually
-    quoted), or reading a script the way the shell hands it one (`-f`,
-    `<`, a pipe) — matched with quoted text emptied, so SQL that holds a
-    `<` is not taken for a redirection. A quoted string that itself starts
-    the client is a command a shell will run, and is read the same way."""
-    client = engine.raw_client_pattern()
-    if not client_invoked(client, command):
+# Programs that take their arguments as text and run none of them: a client
+# named in an issue title or a commit message is not run. git and gh only
+# with subcommands that never start a program named on the command line.
+TEXT_PROGRAMS = {
+    "echo": None,
+    "printf": None,
+    "git": {"add", "blame", "branch", "checkout", "commit", "describe", "diff",
+            "fetch", "grep", "log", "ls-files", "mv", "notes", "push",
+            "restore", "rev-parse", "rm", "shortlog", "show", "stash",
+            "status", "switch", "tag"},
+    "gh": {"api", "gist", "issue", "label", "pr", "release", "repo", "run",
+           "search", "workflow"},
+}
+# options with which git starts a program it is handed
+GIT_RUNS = re.compile(r"^(-c|-x|-O|--exec|--upload-pack|--receive-pack|"
+                      r"--open-files-in-pager|--config-env)", re.I)
+LIVE_IN_TEXT = re.compile(r"\$\(|`|[<>]\(")
+
+
+def _segments(command):
+    """(start, end, next operator) for each simple command of a shell line,
+    split on the operators a shell reads outside quotes. None when a quote
+    is left open: then nothing is taken for text."""
+    out, start, i, quote = [], 0, 0, None
+    while i < len(command):
+        ch = command[i]
+        if quote == "'":
+            if ch == "'":
+                quote = None
+        elif ch == "\\":
+            i += 1
+        elif quote == '"':
+            if ch == '"':
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch in ";&|\n()":
+            out.append((start, i, command[i:i + 2]))
+            start = i + 1
+        i += 1
+    if quote:
+        return None
+    out.append((start, len(command), ""))
+    return out
+
+
+def _text_only(segment):
+    """This simple command runs nothing it names: a program from
+    TEXT_PROGRAMS, called by its bare name, with no substitution anywhere."""
+    if LIVE_IN_TEXT.search(segment):
         return False
-    if re.search(engine.write_sql_pattern(), command, re.I):
+    try:
+        words = shlex.split(segment, comments=False, posix=True)
+    except ValueError:
+        return False
+    while words and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]):
+        words = words[1:]
+    if not words or words[0] not in TEXT_PROGRAMS:
+        return False
+    subcommands = TEXT_PROGRAMS[words[0]]
+    if subcommands is None:
         return True
-    return any(re.search(engine.script_pattern(), unquoted(c), re.I)
-               for c in [command] + [q for q in quoted_commands(command)
-                                     if client_invoked(client, q)])
+    rest = words[1:]
+    if words[0] == "git":
+        if any(GIT_RUNS.match(w) for w in rest):
+            return False
+        while rest[:1] == ["-C"]:
+            rest = rest[2:]
+    return bool(rest) and rest[0] in subcommands
+
+
+def text_reduced(command):
+    """The command with each text-only simple command cut to its program's
+    name, so a client named in its arguments is not read as run
+    (pythia-mysql#2). A text command whose output is piped on keeps its
+    text: what it prints is what the next program reads."""
+    command = command or ""
+    spans = _segments(command)
+    if spans is None:
+        return command
+    out, last = [], 0
+    for start, end, op in spans:
+        piped = op[:1] == "|" and op[:2] != "||"
+        seg = command[start:end]
+        if not piped and _text_only(seg):
+            out.append(command[last:start])
+            out.append(" " + seg.split(None, 1)[0] if seg.strip() else seg)
+            out.append(" ")
+            last = end
+    out.append(command[last:])
+    return "".join(out)
+
+
+def raw_write(engine, command):
+    """`"write"` when the client is handed write SQL anywhere in the
+    command (it is usually quoted), `"script"` when it reads a script the
+    way the shell hands it one (`-f`, `<`, a pipe) — matched with quoted
+    text emptied, so SQL that holds a `<` is not taken for a redirection —
+    and None otherwise. A quoted string that itself starts the client is a
+    command a shell will run, and is read the same way. A client named
+    only in the arguments of a text program (echo, printf, git commit, gh
+    issue) is not run, and is not read."""
+    client = engine.raw_client_pattern()
+    command = text_reduced(command)
+    if not client_invoked(client, command):
+        return None
+    if re.search(engine.write_sql_pattern(), command, re.I):
+        return "write"
+    if any(re.search(engine.script_pattern(), unquoted(c), re.I)
+           for c in [command] + [q for q in quoted_commands(command)
+                                 if client_invoked(client, q)]):
+        return "script"
+    return None
 
 
 # --- the decision -------------------------------------------------------------------------
@@ -410,8 +529,14 @@ def _decide(engine, payload, now):
     kind = _bash_protected(engine, cmd)
     if kind:
         return _deny(why[kind])
-    if raw_write(engine, cmd):
-        return _deny(why["raw"])
+    raw = raw_write(engine, cmd)
+    if raw:
+        return _deny(why["raw" if raw == "write" else "raw_script"])
+    driver = getattr(engine, "driver_pattern", None)
+    reduced = text_reduced(cmd)
+    if driver and re.search(driver(), reduced, re.I) and \
+            re.search(engine.write_sql_pattern(), reduced, re.I):
+        return _deny(why["driver"])
 
     argv = parse_engine_command(engine, cmd, cwd)
     if argv is None:
