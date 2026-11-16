@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 — 2026-11-16
+
+The query tier, `connections add | remove | test`, `check` status rows and
+the guard fixes pythia-mysql 0.3.0 needs; exec-form hooks and the chat
+door's reasons for every engine. The engines on 0.1.x keep working.
 
 - **`query`, a read the guard waves through** (pythia-mysql#1). A new
   query tier (`query_refusal`, `run_query`): `query "SELECT ..."` or `-f

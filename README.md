@@ -8,7 +8,7 @@ build on it: [pythia-postgres](https://github.com/thaildhe172591/pythia-postgres
 [pythia-mongo](https://github.com/thaildhe172591/pythia-mongo) and
 [pythia-mysql](https://github.com/thaildhe172591/pythia-mysql).
 
-**Alpha (0.1.1).** What is here today:
+**Alpha (0.1.2).** What is here today:
 - the engine contract and its conformance check;
 - per-engine connection resolution;
 - the query-contract lint;
